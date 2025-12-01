@@ -2770,6 +2770,29 @@ class CreateWorker(QObject):
                     return False, f"ROWS_EMPTY_BEFORE @ {stage}"
                 stage = "FIND_TARGET_ROW_BEFORE"
                 target, samples, proj_digits = find_target_row(d, proj_code)
+            proj_digits = re.sub(r"\D", "", proj_code or "")
+            target = None
+            samples = []
+            for attempt in range(3):
+                try:
+                    rows = d.find_elements(By.CSS_SELECTOR, "tbody tr")
+                    samples = []
+                    for idx, tr in enumerate(rows):
+                        tds = tr.find_elements(By.CSS_SELECTOR, "td")
+                        full_txt = " ".join([normalize_text(td.text) for td in tds])
+                        full_digits = re.sub(r"\D", "", full_txt)
+                        if idx < 3:
+                            samples.append(full_txt or "(empty)")
+                        if (proj_code and proj_code in full_txt) or (proj_digits and proj_digits in full_digits):
+                            target = tr
+                            break
+                    if target is not None:
+                        break
+                except StaleElementReferenceException:
+                    target = None
+                    samples = []
+                    refocus_first_iframe(d)
+                    time.sleep(0.3)
 
             if not target:
                 return False, f"ROW_NOT_FOUND @ {stage}: proj={proj_code}, digits={proj_digits}, sample={samples}"
