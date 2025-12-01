@@ -2705,14 +2705,71 @@ class CreateWorker(QObject):
                 time.sleep(0.8)
 
             stage = "WAIT_ROWS_BEFORE"
-            WebDriverWait(d, 20).until(
-                EC.presence_of_all_elements_located((By.CSS_SELECTOR, "tbody tr"))
-            )
-            rows = d.find_elements(By.CSS_SELECTOR, "tbody tr")
+
+            def wait_rows_and_sample(driver):
+                WebDriverWait(driver, 20).until(
+                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "tbody tr"))
+                )
+                rows_inner = driver.find_elements(By.CSS_SELECTOR, "tbody tr")
+                return rows_inner
+
+            def find_target_row(driver, proj_code_val):
+                proj_digits_val = re.sub(r"\D", "", proj_code_val or "")
+                samples_inner = []
+                target_inner = None
+                for attempt_inner in range(3):
+                    try:
+                        rows_inner = driver.find_elements(By.CSS_SELECTOR, "tbody tr")
+                        samples_inner = []
+                        for idx, tr in enumerate(rows_inner):
+                            tds = tr.find_elements(By.CSS_SELECTOR, "td")
+                            full_txt = " ".join([normalize_text(td.text) for td in tds])
+                            full_digits = re.sub(r"\D", "", full_txt)
+                            if idx < 3:
+                                samples_inner.append(full_txt or "(empty)")
+                            if (proj_code_val and proj_code_val in full_txt) or (proj_digits_val and proj_digits_val in full_digits):
+                                target_inner = tr
+                                break
+                        if target_inner is not None:
+                            break
+                    except StaleElementReferenceException:
+                        target_inner = None
+                        samples_inner = []
+                        refocus_first_iframe(driver)
+                        time.sleep(0.3)
+                return target_inner, samples_inner, proj_digits_val
+
+            rows = wait_rows_and_sample(d)
             if not rows:
                 return False, f"ROWS_EMPTY_BEFORE @ {stage}"
 
             stage = "FIND_TARGET_ROW_BEFORE"
+            target, samples, proj_digits = find_target_row(d, proj_code)
+
+            if not target:
+                stage = "RETRY_SEARCH_BEFORE"
+                try:
+                    pre_info_retry = d.find_element(By.CSS_SELECTOR, ".dataTables_info").text.strip()
+                except Exception:
+                    pre_info_retry = ""
+                if refocus_first_iframe(d):
+                    click_search_manual(d)
+                try:
+                    WebDriverWait(d, 7).until(
+                        lambda x: (
+                            x.find_element(By.CSS_SELECTOR, ".dataTables_info").text.strip()
+                            if x.find_elements(By.CSS_SELECTOR, ".dataTables_info") else ""
+                        ) != (pre_info_retry or "")
+                    )
+                except Exception:
+                    time.sleep(0.8)
+                if not enter_first_iframe(d):
+                    return False, f"IFRAME_REENTER_FAIL @ {stage}"
+                rows = wait_rows_and_sample(d)
+                if not rows:
+                    return False, f"ROWS_EMPTY_BEFORE @ {stage}"
+                stage = "FIND_TARGET_ROW_BEFORE"
+                target, samples, proj_digits = find_target_row(d, proj_code)
             proj_digits = re.sub(r"\D", "", proj_code or "")
             target = None
             samples = []
