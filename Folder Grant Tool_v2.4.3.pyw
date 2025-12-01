@@ -2639,22 +2639,35 @@ class CreateWorker(QObject):
                     pass
                 return None
 
-            def enter_first_iframe(driver, timeout=15):
-                try:
-                    driver.switch_to.default_content()
-                except Exception:
-                    pass
-                try:
-                    WebDriverWait(driver, timeout).until(
-                        EC.presence_of_all_elements_located((By.TAG_NAME, "iframe"))
-                    )
-                    driver.switch_to.frame(driver.find_elements(By.TAG_NAME, "iframe")[0])
-                    return True
-                except Exception:
-                    return False
+            def enter_first_iframe(driver, timeout=15, reload_url=None):
+                for attempt in range(2):
+                    try:
+                        driver.switch_to.default_content()
+                    except Exception:
+                        pass
 
-            def refocus_first_iframe(driver):
-                return enter_first_iframe(driver, timeout=5)
+                    try:
+                        WebDriverWait(driver, timeout).until(
+                            lambda drv: len(drv.find_elements(By.TAG_NAME, "iframe")) > 0
+                        )
+                        frames = driver.find_elements(By.TAG_NAME, "iframe")
+                        if frames:
+                            driver.switch_to.frame(frames[0])
+                            return True
+                    except Exception:
+                        pass
+
+                    if reload_url and attempt == 0:
+                        try:
+                            driver.get(reload_url)
+                        except Exception:
+                            pass
+                        time.sleep(0.5)
+
+                return False
+
+            def refocus_first_iframe(driver, reload_url=None):
+                return enter_first_iframe(driver, timeout=5, reload_url=reload_url)
 
             stage = "OPEN_LOGIN_PAGE"
             d.get(BUS_LOGIN_URL)
@@ -2674,7 +2687,7 @@ class CreateWorker(QObject):
             d.get(BUS_NEW_URL)
 
             stage = "ENTER_IFRAME"
-            if not enter_first_iframe(d):
+            if not enter_first_iframe(d, reload_url=BUS_NEW_URL):
                 return False, f"IFRAME_ENTER_FAIL @ {stage}"
 
             try:
@@ -2689,7 +2702,7 @@ class CreateWorker(QObject):
                 pass
 
             stage = "CLICK_SEARCH"
-            if not refocus_first_iframe(d):
+            if not refocus_first_iframe(d, reload_url=BUS_NEW_URL):
                 return False, f"IFRAME_LOST_BEFORE_SEARCH @ {stage}"
             click_search_manual(d)
 
@@ -2752,7 +2765,7 @@ class CreateWorker(QObject):
                     pre_info_retry = d.find_element(By.CSS_SELECTOR, ".dataTables_info").text.strip()
                 except Exception:
                     pre_info_retry = ""
-                if refocus_first_iframe(d):
+                if refocus_first_iframe(d, reload_url=BUS_NEW_URL):
                     click_search_manual(d)
                 try:
                     WebDriverWait(d, 7).until(
@@ -2763,36 +2776,13 @@ class CreateWorker(QObject):
                     )
                 except Exception:
                     time.sleep(0.8)
-                if not enter_first_iframe(d):
+                if not enter_first_iframe(d, reload_url=BUS_NEW_URL):
                     return False, f"IFRAME_REENTER_FAIL @ {stage}"
                 rows = wait_rows_and_sample(d)
                 if not rows:
                     return False, f"ROWS_EMPTY_BEFORE @ {stage}"
                 stage = "FIND_TARGET_ROW_BEFORE"
                 target, samples, proj_digits = find_target_row(d, proj_code)
-            proj_digits = re.sub(r"\D", "", proj_code or "")
-            target = None
-            samples = []
-            for attempt in range(3):
-                try:
-                    rows = d.find_elements(By.CSS_SELECTOR, "tbody tr")
-                    samples = []
-                    for idx, tr in enumerate(rows):
-                        tds = tr.find_elements(By.CSS_SELECTOR, "td")
-                        full_txt = " ".join([normalize_text(td.text) for td in tds])
-                        full_digits = re.sub(r"\D", "", full_txt)
-                        if idx < 3:
-                            samples.append(full_txt or "(empty)")
-                        if (proj_code and proj_code in full_txt) or (proj_digits and proj_digits in full_digits):
-                            target = tr
-                            break
-                    if target is not None:
-                        break
-                except StaleElementReferenceException:
-                    target = None
-                    samples = []
-                    refocus_first_iframe(d)
-                    time.sleep(0.3)
 
             if not target:
                 return False, f"ROW_NOT_FOUND @ {stage}: proj={proj_code}, digits={proj_digits}, sample={samples}"
@@ -2859,7 +2849,7 @@ class CreateWorker(QObject):
                 pass
 
             stage = "RELOAD_IFRAME_AFTER_PROCESS"
-            if not enter_first_iframe(d):
+            if not enter_first_iframe(d, reload_url=BUS_NEW_URL):
                 return False, f"IFRAME_REENTER_FAIL @ {stage}"
 
             try:
@@ -2874,7 +2864,7 @@ class CreateWorker(QObject):
                 pass
 
             stage = "CLICK_SEARCH_AFTER"
-            if not refocus_first_iframe(d):
+            if not refocus_first_iframe(d, reload_url=BUS_NEW_URL):
                 return False, f"IFRAME_LOST_AFTER_SEARCH @ {stage}"
             click_search_manual(d)
 
