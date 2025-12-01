@@ -2566,6 +2566,8 @@ class CreateWorker(QObject):
     def _bus_click_process(self, proj_code: str) -> (bool, str):
         d = None
         stage = "INIT"
+        bus_msg_title = ""
+        bus_msg_body = ""
         try:
             options = webdriver.ChromeOptions()
             options.add_argument("--headless=new")
@@ -2602,6 +2604,54 @@ class CreateWorker(QObject):
                         EC.presence_of_all_elements_located((By.TAG_NAME, "iframe"))
                     )
                     driver.switch_to.frame(driver.find_elements(By.TAG_NAME, "iframe")[0])
+
+            def find_swal_popup(driver):
+                try:
+                    driver.switch_to.default_content()
+                except Exception:
+                    pass
+
+                popups = driver.find_elements(By.CSS_SELECTOR, "div.swal2-container.swal2-shown")
+                if popups:
+                    return popups[0]
+
+                try:
+                    frames = driver.find_elements(By.TAG_NAME, "iframe")
+                except Exception:
+                    frames = []
+
+                for fr in frames:
+                    try:
+                        driver.switch_to.frame(fr)
+                        popups = driver.find_elements(By.CSS_SELECTOR, "div.swal2-container.swal2-shown")
+                        if popups:
+                            return popups[0]
+                    except Exception:
+                        pass
+                    try:
+                        driver.switch_to.default_content()
+                    except Exception:
+                        pass
+
+                try:
+                    driver.switch_to.default_content()
+                except Exception:
+                    pass
+                return None
+
+            def refocus_first_iframe(driver):
+                try:
+                    driver.switch_to.default_content()
+                except Exception:
+                    pass
+                try:
+                    WebDriverWait(driver, 5).until(
+                        EC.presence_of_all_elements_located((By.TAG_NAME, "iframe"))
+                    )
+                    driver.switch_to.frame(driver.find_elements(By.TAG_NAME, "iframe")[0])
+                    return True
+                except Exception:
+                    return False
 
             stage = "OPEN_LOGIN_PAGE"
             d.get(BUS_LOGIN_URL)
@@ -2661,15 +2711,26 @@ class CreateWorker(QObject):
             proj_digits = re.sub(r"\D", "", proj_code or "")
             target = None
             samples = []
-            for idx, tr in enumerate(rows):
-                tds = tr.find_elements(By.CSS_SELECTOR, "td")
-                full_txt = " ".join([normalize_text(td.text) for td in tds])
-                full_digits = re.sub(r"\D", "", full_txt)
-                if idx < 3:
-                    samples.append(full_txt or "(empty)")
-                if (proj_code and proj_code in full_txt) or (proj_digits and proj_digits in full_digits):
-                    target = tr
-                    break
+            for attempt in range(3):
+                try:
+                    rows = d.find_elements(By.CSS_SELECTOR, "tbody tr")
+                    samples = []
+                    for idx, tr in enumerate(rows):
+                        tds = tr.find_elements(By.CSS_SELECTOR, "td")
+                        full_txt = " ".join([normalize_text(td.text) for td in tds])
+                        full_digits = re.sub(r"\D", "", full_txt)
+                        if idx < 3:
+                            samples.append(full_txt or "(empty)")
+                        if (proj_code and proj_code in full_txt) or (proj_digits and proj_digits in full_digits):
+                            target = tr
+                            break
+                    if target is not None:
+                        break
+                except StaleElementReferenceException:
+                    target = None
+                    samples = []
+                    refocus_first_iframe(d)
+                    time.sleep(0.3)
 
             if not target:
                 return False, f"ROW_NOT_FOUND @ {stage}: proj={proj_code}, digits={proj_digits}, sample={samples}"
@@ -2692,20 +2753,48 @@ class CreateWorker(QObject):
 
             stage = "WAIT_CONFIRM_POPUP"
 
-            popup_found = False
+            popup = None
             for _ in range(40):  # 최대 8초 (0.2 * 40)
                 try:
-                    d.switch_to.default_content()
-                    elems = d.find_elements(By.CSS_SELECTOR, "div.swal2-container.swal2-shown")
-                    if elems:
-                        popup_found = True
+                    popup = find_swal_popup(d)
+                    if popup:
                         break
                 except Exception:
-                    pass
+                    popup = None
                 time.sleep(0.2)
 
-            if not popup_found:
+            if popup is None:
                 return False, f"CONFIRM_POPUP_NOT_FOUND @ {stage}"
+
+            stage = "READ_CONFIRM_MESSAGE"
+            try:
+                bus_msg_title = (popup.find_element(By.CSS_SELECTOR, ".swal2-title").text or "").strip()
+            except Exception:
+                bus_msg_title = ""
+            try:
+                bus_msg_body = (popup.find_element(By.CSS_SELECTOR, ".swal2-html-container").text or "").strip()
+            except Exception:
+                bus_msg_body = ""
+
+            stage = "CLICK_CONFIRM_POPUP"
+            try:
+                ok_btn = WebDriverWait(popup, 5).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, "button.swal2-confirm"))
+                )
+                try:
+                    ok_btn.click()
+                except ElementClickInterceptedException:
+                    d.execute_script("arguments[0].click();", ok_btn)
+            except Exception as e:
+                return False, f"CONFIRM_POPUP_CLICK_FAIL @ {stage}: {e}"
+
+            stage = "WAIT_CONFIRM_CLOSE"
+            try:
+                WebDriverWait(d, 10).until(lambda _:
+                    find_swal_popup(d) is None
+                )
+            except Exception:
+                pass
 
             stage = "RELOAD_IFRAME_AFTER_PROCESS"
             try:
