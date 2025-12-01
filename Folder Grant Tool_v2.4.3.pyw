@@ -2639,19 +2639,22 @@ class CreateWorker(QObject):
                     pass
                 return None
 
-            def refocus_first_iframe(driver):
+            def enter_first_iframe(driver, timeout=15):
                 try:
                     driver.switch_to.default_content()
                 except Exception:
                     pass
                 try:
-                    WebDriverWait(driver, 5).until(
+                    WebDriverWait(driver, timeout).until(
                         EC.presence_of_all_elements_located((By.TAG_NAME, "iframe"))
                     )
                     driver.switch_to.frame(driver.find_elements(By.TAG_NAME, "iframe")[0])
                     return True
                 except Exception:
                     return False
+
+            def refocus_first_iframe(driver):
+                return enter_first_iframe(driver, timeout=5)
 
             stage = "OPEN_LOGIN_PAGE"
             d.get(BUS_LOGIN_URL)
@@ -2671,8 +2674,8 @@ class CreateWorker(QObject):
             d.get(BUS_NEW_URL)
 
             stage = "ENTER_IFRAME"
-            WebDriverWait(d, 20).until(EC.presence_of_all_elements_located((By.TAG_NAME, "iframe")))
-            d.switch_to.frame(d.find_elements(By.TAG_NAME, "iframe")[0])
+            if not enter_first_iframe(d):
+                return False, f"IFRAME_ENTER_FAIL @ {stage}"
 
             try:
                 pre_info = d.find_element(By.CSS_SELECTOR, ".dataTables_info").text.strip()
@@ -2686,6 +2689,8 @@ class CreateWorker(QObject):
                 pass
 
             stage = "CLICK_SEARCH"
+            if not refocus_first_iframe(d):
+                return False, f"IFRAME_LOST_BEFORE_SEARCH @ {stage}"
             click_search_manual(d)
 
             stage = "WAIT_FILTER_APPLY"
@@ -2797,18 +2802,8 @@ class CreateWorker(QObject):
                 pass
 
             stage = "RELOAD_IFRAME_AFTER_PROCESS"
-            try:
-                d.switch_to.default_content()
-            except:
-                pass
-
-            try:
-                WebDriverWait(d, 15).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "iframe"))
-                )
-                d.switch_to.frame(d.find_elements(By.TAG_NAME, "iframe")[0])
-            except Exception as e:
-                return False, f"IFRAME_REENTER_FAIL @ {stage}: {e}"
+            if not enter_first_iframe(d):
+                return False, f"IFRAME_REENTER_FAIL @ {stage}"
 
             try:
                 pre_info2 = d.find_element(By.CSS_SELECTOR, ".dataTables_info").text.strip()
@@ -2822,6 +2817,8 @@ class CreateWorker(QObject):
                 pass
 
             stage = "CLICK_SEARCH_AFTER"
+            if not refocus_first_iframe(d):
+                return False, f"IFRAME_LOST_AFTER_SEARCH @ {stage}"
             click_search_manual(d)
 
             stage = "WAIT_FILTER_APPLY_AFTER"
