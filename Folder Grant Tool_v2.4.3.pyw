@@ -2265,7 +2265,7 @@ class ManualNewRequestDialog(QDialog):
 
         form = QFormLayout()
         self.edt_proj = QLineEdit(self)
-        self.edt_proj.setPlaceholderText("예: 25001 (숫자 5자리)")
+        self.edt_proj.setPlaceholderText("예: 25001")
         self.edt_proj.setMaxLength(5)
         self.edt_name = QLineEdit(self)
         self.edt_name.setPlaceholderText("프로젝트명")
