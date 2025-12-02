@@ -2257,6 +2257,33 @@ class CheckBoxHeaderAt(QHeaderView):
             return
         super().mousePressEvent(e)
 
+class ManualNewRequestDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("수동 추가")
+        lay = QVBoxLayout(self)
+
+        form = QFormLayout()
+        self.edt_proj = QLineEdit(self)
+        self.edt_proj.setPlaceholderText("예: 25001 (숫자 5자리)")
+        self.edt_proj.setMaxLength(5)
+        self.edt_name = QLineEdit(self)
+        self.edt_name.setPlaceholderText("프로젝트명")
+        form.addRow("프로젝트 코드", self.edt_proj)
+        form.addRow("프로젝트명", self.edt_name)
+        lay.addLayout(form)
+
+        btn_box = QDialogButtonBox(Qt.Horizontal, self)
+        self.btn_ok = btn_box.addButton("생성", QDialogButtonBox.AcceptRole)
+        self.btn_cancel = btn_box.addButton("취소", QDialogButtonBox.RejectRole)
+        self.btn_ok.clicked.connect(self.accept)
+        self.btn_cancel.clicked.connect(self.reject)
+        lay.addWidget(btn_box)
+
+    def values(self) -> tuple[str, str]:
+        return self.edt_proj.text().strip(), self.edt_name.text().strip()
+
+
 class NewItemsViewer(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2275,12 +2302,15 @@ class NewItemsViewer(QDialog):
         self.tbl.horizontalHeader().setStretchLastSection(True)
 
         btns = QHBoxLayout()
-        self.btn_create = QPushButton("폴더 생성")
+        self.btn_manual = QPushButton("수동 추가")
+        self.btn_create = QPushButton("자동 생성")
         self.btn_refresh = QPushButton("↻ 새로고침")
         self.btn_close = QPushButton("닫기")
         self.btn_close.clicked.connect(self.accept)
         self.btn_create.clicked.connect(self._on_create_clicked)
+        self.btn_manual.clicked.connect(self._on_manual_clicked)
         btns.addStretch()
+        btns.addWidget(self.btn_manual)
         btns.addWidget(self.btn_create)
         btns.addWidget(self.btn_refresh)
         btns.addWidget(self.btn_close)
@@ -2302,6 +2332,7 @@ class NewItemsViewer(QDialog):
     def _set_busy(self, on: bool, msg: str = ""):
         self.status_lbl.setText(msg or "")
         self.prg.setVisible(on)
+        self.btn_manual.setEnabled(not on)
         self.btn_create.setEnabled(not on)
         self.btn_refresh.setEnabled(not on)
         self.btn_close.setEnabled(not on)
@@ -2321,7 +2352,6 @@ class NewItemsViewer(QDialog):
         try:
             self.worker_thread.quit()
             self.worker_thread.wait(1500)
-
         except Exception:
             pass
 
@@ -2329,6 +2359,33 @@ class NewItemsViewer(QDialog):
         self.worker_thread.deleteLater()
         self.worker = None
         self.worker_thread = None
+
+    def _manual_add(self, proj: str, name: str):
+        parent = self.parent()
+        ps_path = getattr(parent, "ps_path", shutil.which("pwsh") or shutil.which("powershell") or "powershell")
+        ps_kind = getattr(parent, "ps_kind", "pwsh" if "pwsh" in os.path.basename(ps_path).lower() else "powershell")
+
+        worker = CreateWorker([], {}, ps_path, ps_kind)
+        self._set_busy(True, f"{proj} 폴더/권한 생성 중…")
+        ok, msg = worker._create_group_and_folder(proj, name)
+        self._set_busy(False, "")
+
+        if ok:
+            QMessageBox.information(self, "완료", f"{proj} 생성 완료")
+        else:
+            QMessageBox.critical(self, "오류", f"{proj} 생성 실패: {msg}")
+
+    def _on_manual_clicked(self):
+        dlg = ManualNewRequestDialog(self)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+
+        proj, name = dlg.values()
+        if not proj:
+            QMessageBox.warning(self, "알림", "프로젝트 코드를 입력하세요.")
+            return
+
+        self._manual_add(proj, name)
 
     def _hide_empty_columns(self, always_show: set[str] | None = None, skip_col_idx: int | None = None):
         t = self.tbl
@@ -2566,6 +2623,8 @@ class CreateWorker(QObject):
     def _bus_click_process(self, proj_code: str) -> (bool, str):
         d = None
         stage = "INIT"
+        bus_msg_title = ""
+        bus_msg_body = ""
         try:
             options = webdriver.ChromeOptions()
             options.add_argument("--headless=new")
@@ -2603,6 +2662,70 @@ class CreateWorker(QObject):
                     )
                     driver.switch_to.frame(driver.find_elements(By.TAG_NAME, "iframe")[0])
 
+            def find_swal_popup(driver):
+                try:
+                    driver.switch_to.default_content()
+                except Exception:
+                    pass
+
+                popups = driver.find_elements(By.CSS_SELECTOR, "div.swal2-container.swal2-shown")
+                if popups:
+                    return popups[0]
+
+                try:
+                    frames = driver.find_elements(By.TAG_NAME, "iframe")
+                except Exception:
+                    frames = []
+
+                for fr in frames:
+                    try:
+                        driver.switch_to.frame(fr)
+                        popups = driver.find_elements(By.CSS_SELECTOR, "div.swal2-container.swal2-shown")
+                        if popups:
+                            return popups[0]
+                    except Exception:
+                        pass
+                    try:
+                        driver.switch_to.default_content()
+                    except Exception:
+                        pass
+
+                try:
+                    driver.switch_to.default_content()
+                except Exception:
+                    pass
+                return None
+
+            def enter_first_iframe(driver, timeout=15, reload_url=None):
+                for attempt in range(2):
+                    try:
+                        driver.switch_to.default_content()
+                    except Exception:
+                        pass
+
+                    try:
+                        WebDriverWait(driver, timeout).until(
+                            lambda drv: len(drv.find_elements(By.TAG_NAME, "iframe")) > 0
+                        )
+                        frames = driver.find_elements(By.TAG_NAME, "iframe")
+                        if frames:
+                            driver.switch_to.frame(frames[0])
+                            return True
+                    except Exception:
+                        pass
+
+                    if reload_url and attempt == 0:
+                        try:
+                            driver.get(reload_url)
+                        except Exception:
+                            pass
+                        time.sleep(0.5)
+
+                return False
+
+            def refocus_first_iframe(driver, reload_url=None):
+                return enter_first_iframe(driver, timeout=5, reload_url=reload_url)
+
             stage = "OPEN_LOGIN_PAGE"
             d.get(BUS_LOGIN_URL)
             WebDriverWait(d, 20).until(EC.presence_of_element_located((By.ID, "windowsaccount")))
@@ -2621,8 +2744,8 @@ class CreateWorker(QObject):
             d.get(BUS_NEW_URL)
 
             stage = "ENTER_IFRAME"
-            WebDriverWait(d, 20).until(EC.presence_of_all_elements_located((By.TAG_NAME, "iframe")))
-            d.switch_to.frame(d.find_elements(By.TAG_NAME, "iframe")[0])
+            if not enter_first_iframe(d, reload_url=BUS_NEW_URL):
+                return False, f"IFRAME_ENTER_FAIL @ {stage}"
 
             try:
                 pre_info = d.find_element(By.CSS_SELECTOR, ".dataTables_info").text.strip()
@@ -2636,6 +2759,8 @@ class CreateWorker(QObject):
                 pass
 
             stage = "CLICK_SEARCH"
+            if not refocus_first_iframe(d, reload_url=BUS_NEW_URL):
+                return False, f"IFRAME_LOST_BEFORE_SEARCH @ {stage}"
             click_search_manual(d)
 
             stage = "WAIT_FILTER_APPLY"
@@ -2650,26 +2775,71 @@ class CreateWorker(QObject):
                 time.sleep(0.8)
 
             stage = "WAIT_ROWS_BEFORE"
-            WebDriverWait(d, 20).until(
-                EC.presence_of_all_elements_located((By.CSS_SELECTOR, "tbody tr"))
-            )
-            rows = d.find_elements(By.CSS_SELECTOR, "tbody tr")
+
+            def wait_rows_and_sample(driver):
+                WebDriverWait(driver, 20).until(
+                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "tbody tr"))
+                )
+                rows_inner = driver.find_elements(By.CSS_SELECTOR, "tbody tr")
+                return rows_inner
+
+            def find_target_row(driver, proj_code_val):
+                proj_digits_val = re.sub(r"\D", "", proj_code_val or "")
+                samples_inner = []
+                target_inner = None
+                for attempt_inner in range(3):
+                    try:
+                        rows_inner = driver.find_elements(By.CSS_SELECTOR, "tbody tr")
+                        samples_inner = []
+                        for idx, tr in enumerate(rows_inner):
+                            tds = tr.find_elements(By.CSS_SELECTOR, "td")
+                            full_txt = " ".join([normalize_text(td.text) for td in tds])
+                            full_digits = re.sub(r"\D", "", full_txt)
+                            if idx < 3:
+                                samples_inner.append(full_txt or "(empty)")
+                            if (proj_code_val and proj_code_val in full_txt) or (proj_digits_val and proj_digits_val in full_digits):
+                                target_inner = tr
+                                break
+                        if target_inner is not None:
+                            break
+                    except StaleElementReferenceException:
+                        target_inner = None
+                        samples_inner = []
+                        refocus_first_iframe(driver)
+                        time.sleep(0.3)
+                return target_inner, samples_inner, proj_digits_val
+
+            rows = wait_rows_and_sample(d)
             if not rows:
                 return False, f"ROWS_EMPTY_BEFORE @ {stage}"
 
             stage = "FIND_TARGET_ROW_BEFORE"
-            proj_digits = re.sub(r"\D", "", proj_code or "")
-            target = None
-            samples = []
-            for idx, tr in enumerate(rows):
-                tds = tr.find_elements(By.CSS_SELECTOR, "td")
-                full_txt = " ".join([normalize_text(td.text) for td in tds])
-                full_digits = re.sub(r"\D", "", full_txt)
-                if idx < 3:
-                    samples.append(full_txt or "(empty)")
-                if (proj_code and proj_code in full_txt) or (proj_digits and proj_digits in full_digits):
-                    target = tr
-                    break
+            target, samples, proj_digits = find_target_row(d, proj_code)
+
+            if not target:
+                stage = "RETRY_SEARCH_BEFORE"
+                try:
+                    pre_info_retry = d.find_element(By.CSS_SELECTOR, ".dataTables_info").text.strip()
+                except Exception:
+                    pre_info_retry = ""
+                if refocus_first_iframe(d, reload_url=BUS_NEW_URL):
+                    click_search_manual(d)
+                try:
+                    WebDriverWait(d, 7).until(
+                        lambda x: (
+                            x.find_element(By.CSS_SELECTOR, ".dataTables_info").text.strip()
+                            if x.find_elements(By.CSS_SELECTOR, ".dataTables_info") else ""
+                        ) != (pre_info_retry or "")
+                    )
+                except Exception:
+                    time.sleep(0.8)
+                if not enter_first_iframe(d, reload_url=BUS_NEW_URL):
+                    return False, f"IFRAME_REENTER_FAIL @ {stage}"
+                rows = wait_rows_and_sample(d)
+                if not rows:
+                    return False, f"ROWS_EMPTY_BEFORE @ {stage}"
+                stage = "FIND_TARGET_ROW_BEFORE"
+                target, samples, proj_digits = find_target_row(d, proj_code)
 
             if not target:
                 return False, f"ROW_NOT_FOUND @ {stage}: proj={proj_code}, digits={proj_digits}, sample={samples}"
@@ -2692,34 +2862,52 @@ class CreateWorker(QObject):
 
             stage = "WAIT_CONFIRM_POPUP"
 
-            popup_found = False
+            popup = None
             for _ in range(40):  # 최대 8초 (0.2 * 40)
                 try:
-                    d.switch_to.default_content()
-                    elems = d.find_elements(By.CSS_SELECTOR, "div.swal2-container.swal2-shown")
-                    if elems:
-                        popup_found = True
+                    popup = find_swal_popup(d)
+                    if popup:
                         break
                 except Exception:
-                    pass
+                    popup = None
                 time.sleep(0.2)
 
-            if not popup_found:
+            if popup is None:
                 return False, f"CONFIRM_POPUP_NOT_FOUND @ {stage}"
 
-            stage = "RELOAD_IFRAME_AFTER_PROCESS"
+            stage = "READ_CONFIRM_MESSAGE"
             try:
-                d.switch_to.default_content()
-            except:
+                bus_msg_title = (popup.find_element(By.CSS_SELECTOR, ".swal2-title").text or "").strip()
+            except Exception:
+                bus_msg_title = ""
+            try:
+                bus_msg_body = (popup.find_element(By.CSS_SELECTOR, ".swal2-html-container").text or "").strip()
+            except Exception:
+                bus_msg_body = ""
+
+            stage = "CLICK_CONFIRM_POPUP"
+            try:
+                ok_btn = WebDriverWait(popup, 5).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, "button.swal2-confirm"))
+                )
+                try:
+                    ok_btn.click()
+                except ElementClickInterceptedException:
+                    d.execute_script("arguments[0].click();", ok_btn)
+            except Exception as e:
+                return False, f"CONFIRM_POPUP_CLICK_FAIL @ {stage}: {e}"
+
+            stage = "WAIT_CONFIRM_CLOSE"
+            try:
+                WebDriverWait(d, 10).until(lambda _:
+                    find_swal_popup(d) is None
+                )
+            except Exception:
                 pass
 
-            try:
-                WebDriverWait(d, 15).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "iframe"))
-                )
-                d.switch_to.frame(d.find_elements(By.TAG_NAME, "iframe")[0])
-            except Exception as e:
-                return False, f"IFRAME_REENTER_FAIL @ {stage}: {e}"
+            stage = "RELOAD_IFRAME_AFTER_PROCESS"
+            if not enter_first_iframe(d, reload_url=BUS_NEW_URL):
+                return False, f"IFRAME_REENTER_FAIL @ {stage}"
 
             try:
                 pre_info2 = d.find_element(By.CSS_SELECTOR, ".dataTables_info").text.strip()
@@ -2733,6 +2921,8 @@ class CreateWorker(QObject):
                 pass
 
             stage = "CLICK_SEARCH_AFTER"
+            if not refocus_first_iframe(d, reload_url=BUS_NEW_URL):
+                return False, f"IFRAME_LOST_AFTER_SEARCH @ {stage}"
             click_search_manual(d)
 
             stage = "WAIT_FILTER_APPLY_AFTER"
@@ -2809,6 +2999,29 @@ class CreateWorker(QObject):
         ps.append(
             f"if (!(Test-Path '{psq(root_path)}')) {{ "
             f"robocopy '{psq(TEMPLATE_ROOT)}' '{psq(root_path)}' *.* /E /COPYALL | Out-Null; }}"
+        )
+        ps.append(
+            f"$paths = @('{psq(root_path)}', '{psq(study_all)}'); "
+            "foreach($p in $paths) { "
+            "if (Test-Path $p) { "
+            "$acl = Get-Acl $p; $unknown = @(); "
+            "foreach($ace in $acl.Access) { "
+            "$val = $ace.IdentityReference.Value; "
+            "if ($val -and $val -match '^S-1-') { $unknown += $val; continue } "
+            "try { "
+                "$null = $ace.IdentityReference.Translate([System.Security.Principal.NTAccount]); "
+            "} catch { "
+                "$val = $ace.IdentityReference.Value; "
+                "if ($val -and $val -match '^S-1-') { $unknown += $val } "
+                "elseif ($val) { $unknown += $val } "
+            "} "
+            "} "
+            "$unknown = $unknown | Sort-Object -Unique; "
+            "foreach($sid in $unknown) { "
+            "try { icacls \"$p\" /remove \"$sid\" /T /C | Out-Null; } catch {} "
+            "} "
+            "} "
+            "} "
         )
         ps.append(
             f"if (Test-Path '{psq(root_path)}') {{ "
