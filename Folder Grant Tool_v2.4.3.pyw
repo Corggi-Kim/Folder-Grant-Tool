@@ -2944,6 +2944,18 @@ class CreateWorker(QObject):
             f"robocopy '{psq(TEMPLATE_ROOT)}' '{psq(root_path)}' *.* /E /COPYALL | Out-Null; }}"
         )
         ps.append(
+            "$paths = @('" + psq(root_path) + "', '" + psq(study_all) + "'); "
+            "foreach($p in $paths) { "
+            "if (Test-Path $p) { "
+            "$acl = Get-Acl $p; $unknown = @(); "
+            "foreach($ace in $acl.Access) { "
+            "try { $null = $ace.IdentityReference.Translate([System.Security.Principal.NTAccount]); } "
+            "catch { $unknown += $ace.IdentityReference.Value } } "
+            "$unknown = $unknown | Sort-Object -Unique; "
+            "foreach($sid in $unknown) { try { icacls $p /remove $sid | Out-Null; } catch {} } "
+            "} }"
+        )
+        ps.append(
             f"if (Test-Path '{psq(root_path)}') {{ "
             f"icacls '{psq(root_path)}' /grant '{psq(group_name)}:(ci)(oi)rx' | Out-Null; }}"
         )
