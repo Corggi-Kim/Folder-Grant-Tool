@@ -3007,9 +3007,11 @@ class CreateWorker(QObject):
             "$acl = Get-Acl $p; $unknown = @(); "
             "foreach($ace in $acl.Access) { "
             "try { $null = $ace.IdentityReference.Translate([System.Security.Principal.NTAccount]); } "
-            "catch { $unknown += $ace.IdentityReference.Value } } "
+            "catch { if ($ace.IdentityReference.Value) { $unknown += $ace.IdentityReference.Value } } } "
             "$unknown = $unknown | Sort-Object -Unique; "
-            "foreach($sid in $unknown) { try { icacls $p /remove $sid | Out-Null; } catch {} } "
+            "foreach($sid in $unknown) { "
+            "try { icacls $p /remove \"$sid\" /T /C | Out-Null; } catch {} "
+            "} "
             "} }"
         )
         ps.append(
