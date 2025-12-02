@@ -2257,6 +2257,33 @@ class CheckBoxHeaderAt(QHeaderView):
             return
         super().mousePressEvent(e)
 
+class ManualNewRequestDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("수동 추가")
+        lay = QVBoxLayout(self)
+
+        form = QFormLayout()
+        self.edt_proj = QLineEdit(self)
+        self.edt_proj.setPlaceholderText("예: 25001 (숫자 5자리)")
+        self.edt_proj.setMaxLength(5)
+        self.edt_name = QLineEdit(self)
+        self.edt_name.setPlaceholderText("프로젝트명")
+        form.addRow("프로젝트 코드", self.edt_proj)
+        form.addRow("프로젝트명", self.edt_name)
+        lay.addLayout(form)
+
+        btn_box = QDialogButtonBox(Qt.Horizontal, self)
+        self.btn_ok = btn_box.addButton("생성", QDialogButtonBox.AcceptRole)
+        self.btn_cancel = btn_box.addButton("취소", QDialogButtonBox.RejectRole)
+        self.btn_ok.clicked.connect(self.accept)
+        self.btn_cancel.clicked.connect(self.reject)
+        lay.addWidget(btn_box)
+
+    def values(self) -> tuple[str, str]:
+        return self.edt_proj.text().strip(), self.edt_name.text().strip()
+
+
 class NewItemsViewer(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2275,12 +2302,15 @@ class NewItemsViewer(QDialog):
         self.tbl.horizontalHeader().setStretchLastSection(True)
 
         btns = QHBoxLayout()
-        self.btn_create = QPushButton("폴더 생성")
+        self.btn_manual = QPushButton("수동 추가")
+        self.btn_create = QPushButton("자동 생성")
         self.btn_refresh = QPushButton("↻ 새로고침")
         self.btn_close = QPushButton("닫기")
         self.btn_close.clicked.connect(self.accept)
         self.btn_create.clicked.connect(self._on_create_clicked)
+        self.btn_manual.clicked.connect(self._on_manual_clicked)
         btns.addStretch()
+        btns.addWidget(self.btn_manual)
         btns.addWidget(self.btn_create)
         btns.addWidget(self.btn_refresh)
         btns.addWidget(self.btn_close)
@@ -2302,6 +2332,7 @@ class NewItemsViewer(QDialog):
     def _set_busy(self, on: bool, msg: str = ""):
         self.status_lbl.setText(msg or "")
         self.prg.setVisible(on)
+        self.btn_manual.setEnabled(not on)
         self.btn_create.setEnabled(not on)
         self.btn_refresh.setEnabled(not on)
         self.btn_close.setEnabled(not on)
@@ -2321,7 +2352,6 @@ class NewItemsViewer(QDialog):
         try:
             self.worker_thread.quit()
             self.worker_thread.wait(1500)
-
         except Exception:
             pass
 
@@ -2329,6 +2359,33 @@ class NewItemsViewer(QDialog):
         self.worker_thread.deleteLater()
         self.worker = None
         self.worker_thread = None
+
+    def _manual_add(self, proj: str, name: str):
+        parent = self.parent()
+        ps_path = getattr(parent, "ps_path", shutil.which("pwsh") or shutil.which("powershell") or "powershell")
+        ps_kind = getattr(parent, "ps_kind", "pwsh" if "pwsh" in os.path.basename(ps_path).lower() else "powershell")
+
+        worker = CreateWorker([], {}, ps_path, ps_kind)
+        self._set_busy(True, f"{proj} 폴더/권한 생성 중…")
+        ok, msg = worker._create_group_and_folder(proj, name)
+        self._set_busy(False, "")
+
+        if ok:
+            QMessageBox.information(self, "완료", f"{proj} 생성 완료")
+        else:
+            QMessageBox.critical(self, "오류", f"{proj} 생성 실패: {msg}")
+
+    def _on_manual_clicked(self):
+        dlg = ManualNewRequestDialog(self)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+
+        proj, name = dlg.values()
+        if not proj:
+            QMessageBox.warning(self, "알림", "프로젝트 코드를 입력하세요.")
+            return
+
+        self._manual_add(proj, name)
 
     def _hide_empty_columns(self, always_show: set[str] | None = None, skip_col_idx: int | None = None):
         t = self.tbl
