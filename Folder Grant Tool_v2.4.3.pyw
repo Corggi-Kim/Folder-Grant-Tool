@@ -3007,7 +3007,7 @@ class CreateWorker(QObject):
             "$acl = Get-Acl $p; $unknown = @(); "
             "foreach($ace in $acl.Access) { "
             "try { $null = $ace.IdentityReference.Translate([System.Security.Principal.NTAccount]); } "
-            "catch { if ($ace.IdentityReference.Value) { $unknown += $ace.IdentityReference.Value } } } "
+            "catch { $val = $ace.IdentityReference.Value; if ($val -and $val -match '^S-1-') { $unknown += $val } } } "
             "$unknown = $unknown | Sort-Object -Unique; "
             "foreach($sid in $unknown) { "
             "try { icacls $p /remove \"$sid\" /T /C | Out-Null; } catch {} "
