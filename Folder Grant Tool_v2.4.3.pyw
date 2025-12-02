@@ -3001,7 +3001,7 @@ class CreateWorker(QObject):
             f"robocopy '{psq(TEMPLATE_ROOT)}' '{psq(root_path)}' *.* /E /COPYALL | Out-Null; }}"
         )
         ps.append(
-            "$paths = @('" + psq(root_path) + "', '" + psq(study_all) + "'); "
+            f"$paths = @('{psq(root_path)}', '{psq(study_all)}'); "
             "foreach($p in $paths) { "
             "if (Test-Path $p) { "
             "$acl = Get-Acl $p; $unknown = @(); "
@@ -3010,7 +3010,7 @@ class CreateWorker(QObject):
             "catch { $val = $ace.IdentityReference.Value; if ($val -and $val -match '^S-1-') { $unknown += $val } } } "
             "$unknown = $unknown | Sort-Object -Unique; "
             "foreach($sid in $unknown) { "
-            "try { icacls $p /remove \"$sid\" /T /C | Out-Null; } catch {} "
+            "try { icacls \"$p\" /remove \"$sid\" /T /C | Out-Null; } catch {} "
             "} "
             "} }"
         )
