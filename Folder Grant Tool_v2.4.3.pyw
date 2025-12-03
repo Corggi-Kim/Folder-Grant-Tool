@@ -34,7 +34,7 @@ from openpyxl import load_workbook
 
 APP_NAME = "Folder Grant Tool"
 APP_VERSION = "3.0.1"  #구조변경, 기능추가, 오류/버그수정
-APP_BUILD = "2025-11-26"
+APP_BUILD = "2025-12-02"
 APP_VERSION_STR = f"v{APP_VERSION}"
 
 THEMES = {
