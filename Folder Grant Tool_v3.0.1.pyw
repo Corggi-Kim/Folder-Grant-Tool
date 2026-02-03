@@ -438,13 +438,12 @@ def generate_add_script(user_id: str, proj_raw: str, lv2: str, lv3: str, role: s
     if is_lv3_etc(lv3):
         return ' '.join(cmds)
 
-    if not role_clean:
-        cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
-        return ' '.join(cmds)
-
     is_new = is_new_template(proj_raw)
 
     if lv2_norm == "Study":
+        if not role_clean:
+            cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
+            return ' '.join(cmds)
         if is_new:
             if role_clean not in STUDY_ROLES or role_clean not in ROLE_MAP:
                 return ""
@@ -477,6 +476,9 @@ def generate_add_script(user_id: str, proj_raw: str, lv2: str, lv3: str, role: s
             for sub in iso_map[role_clean]:
                 cmds.append(f"icacls '{psq(path_l3)}\\{psq(sub)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
         else:
+            if not role_clean:
+                cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
+                return ' '.join(cmds)
             if role_clean != "Randomization Statistician":
                 return ""
             cmds.append(build_legacy_isolated_add(user_id, path_l3))
