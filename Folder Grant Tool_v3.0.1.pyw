@@ -153,7 +153,7 @@ RELEASE_HINT_HEADERS = {
 SHARE_ROOT = r"\\LSK_S010\Study Folder\{proj_seg}\{lv2}\{lv3}"
 CLOSED_ROOT = r"\\192.168.1.95\Study_Closed"
 
-LEVEL3_CHOICES = ["ARS","CO","DM","ER","MW","PM","PV","RA","SSU","STAT","ETC"]
+LEVEL3_CHOICES = ["ARS","CO","DM","ER","MW","PM","PV","RA","SSU","STAT","STAT_IDMC","ETC"]
 
 ROLE_MAP: Dict[str, List[str]] = {
     "Trial STAT/SP": ["3.Dataset", "4.Analysis", "5.SDTM", "6.Validation"],
@@ -181,6 +181,8 @@ FORCE_NEW_CODES = {
     "24-084", "24-076", "24-072", "24-061", "24-037", "24-033", "24-026", "24-009",
     "21-040",
 }
+STAT_IDMC_NEW_THRESHOLD = 26012
+STAT_IDMC_FORCE_NEW_CODES = {"25-074"}
 
 HEADER_ALIASES = {
     "user":   {"대상자사번"},
@@ -246,6 +248,12 @@ def normalize_lv2(s: str) -> str:
     t = (s or "").strip().lower()
     return "Isolated" if "iso" in t else "Study"
 
+def is_stat_idmc_lv3(lv3: str) -> bool:
+    return (lv3 or "").strip().upper() == "STAT_IDMC"
+
+def is_stat_lv3(lv3: str) -> bool:
+    return (lv3 or "").strip().upper() in {"STAT", "STAT_IDMC"}
+
 def is_lv3_etc(lv3: str) -> bool:
     return (lv3 or "").strip().lower() == "etc"
 
@@ -298,6 +306,16 @@ def is_new_template(proj_raw: str) -> bool:
     if lsk_code in FORCE_NEW_CODES:
         return True
     return code_yyxxx >= NEW_THRESHOLD
+
+def is_stat_idmc_new_policy(proj_raw: str) -> bool:
+    lsk_code = _lsk_code_for_compare(proj_raw)
+    if lsk_code in STAT_IDMC_FORCE_NEW_CODES:
+        return True
+    try:
+        code_yyxxx = int(_yyxxx_from_proj_for_groupname(proj_raw))
+    except Exception:
+        return False
+    return code_yyxxx >= STAT_IDMC_NEW_THRESHOLD
 
 def build_path_l3(proj_raw: str, lv2: str, lv3: str) -> str:
     seg = proj_segment_for_folder(proj_raw)
@@ -409,6 +427,7 @@ def generate_add_script(user_id: str, proj_raw: str, lv2: str, lv3: str, role: s
     path_l3 = build_path_l3(proj_raw, lv2, lv3)
     lv2_norm = normalize_lv2(lv2)
     role_clean = (role or "").strip()
+    is_stat_idmc = is_stat_idmc_lv3(lv3)
     cmds = []
 
     cmds.append(
@@ -436,7 +455,17 @@ def generate_add_script(user_id: str, proj_raw: str, lv2: str, lv3: str, role: s
             cmds.append(build_legacy_study_add(user_id, path_l3, role_clean))
 
     elif lv2_norm == "Isolated":
-        if is_new:
+        if is_stat_idmc:
+            if is_stat_idmc_new_policy(proj_raw):
+                if role_clean and (role_clean not in STUDY_ROLES or role_clean not in ROLE_MAP):
+                    return ""
+                cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
+                if role_clean:
+                    for sub in ROLE_MAP[role_clean]:
+                        cmds.append(f"icacls '{psq(path_l3)}\\{psq(sub)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
+            else:
+                cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm' /t;")
+        elif is_new:
             if role_clean not in ISOLATED_ROLES:
                 return ""
             iso_map = {
@@ -2120,14 +2149,18 @@ class ManualEntryDialog(QDialog):
             self.cb_role.setCurrentIndex(0)
             self.cb_role.setEnabled(False)
 
-            if lv3 != "STAT":
+            if not is_stat_lv3(lv3):
                 return
 
             candidates = []
             if lv2 == "Study":
                 candidates = sorted(STUDY_ROLES)
             elif lv2 == "Isolated":
-                candidates = sorted(ISOLATED_ROLES) if is_new else ["Randomization Statistician"]
+                if is_stat_idmc_lv3(lv3):
+                    if is_stat_idmc_new_policy(self.le_proj.text().strip()):
+                        candidates = sorted(STUDY_ROLES)
+                else:
+                    candidates = sorted(ISOLATED_ROLES) if is_new else ["Randomization Statistician"]
 
             if candidates:
                 self.cb_role.blockSignals(True)
@@ -2178,7 +2211,7 @@ class ManualEntryDialog(QDialog):
                 QMessageBox.warning(self, "입력 누락", f"다음 항목을 입력해 주세요: {', '.join(missing)}")
                 return
 
-            if lv3 != "STAT":
+            if not is_stat_lv3(lv3):
                 role = ""
 
             self.result_row = (reqtype, user, proj, lv2, lv3, "", role, kind)
@@ -4935,7 +4968,13 @@ class AccessManager(QMainWindow):
                     )
 
         elif lv2_norm == "Isolated":
-            if is_new:
+            if is_stat_idmc_lv3(lv3):
+                if is_stat_idmc_new_policy(proj):
+                    if role not in STUDY_ROLES:
+                        return False, f"{row+1}행: Isolated STAT_IDMC에서는 허용되지 않는 STATROLE '{role}'"
+                    if role not in ROLE_MAP:
+                        return False, f"{row+1}행: Isolated STAT_IDMC 신버전에서 STATROLE '{role}' 매핑 없음(ROLE_MAP 보강 필요)"
+            elif is_new:
                 if role not in ISOLATED_ROLES:
                     return False, f"{row+1}행: Isolated에서는 허용되지 않는 STATROLE '{role}'"
             else:
@@ -5067,4 +5106,3 @@ if __name__ == "__main__":
             pass
     window.show()
     sys.exit(app.exec_())
-
