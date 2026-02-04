@@ -34,7 +34,7 @@ from openpyxl import load_workbook
 
 APP_NAME = "Folder Grant Tool"
 APP_VERSION = "3.1.1"  #구조변경, 기능추가, 오류/버그수정
-APP_BUILD = "2026-02-03"
+APP_BUILD = "2026-02-04"
 APP_VERSION_STR = f"v{APP_VERSION}"
 
 THEMES = {
@@ -182,7 +182,7 @@ FORCE_NEW_CODES = {
     "21-040",
 }
 STAT_IDMC_NEW_THRESHOLD = 26012
-STAT_IDMC_FORCE_NEW_CODES = {"25-074"}
+STAT_IDMC_FORCE_NEW_CODES = {"25-074", "25-077"}
 
 HEADER_ALIASES = {
     "user":   {"대상자사번"},
