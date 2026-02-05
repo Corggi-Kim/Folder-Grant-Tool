@@ -469,6 +469,7 @@ def generate_add_script(user_id: str, proj_raw: str, lv2: str, lv3: str, role: s
                 if role_clean and role_clean not in ISOLATED_STAT_IDMC_ROLE_MAP:
                     return ""
                 if role_clean:
+                    cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
                     for sub in ISOLATED_STAT_IDMC_ROLE_MAP[role_clean]:
                         cmds.append(f"icacls '{psq(path_l3)}\\{psq(sub)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
             else:
