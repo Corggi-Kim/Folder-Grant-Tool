@@ -168,6 +168,13 @@ ROLE_MAP: Dict[str, List[str]] = {
 STUDY_ROLES = {"Trial STAT/SP", "Verification SP", "SDTM", "Manager"}
 ISOLATED_ROLES = {"Randomization Statistician", "Blind Reviewer", "Unblind Reviewer"}
 
+ISOLATED_STAT_IDMC_ROLE_MAP: Dict[str, List[str]] = {
+    "Trial STAT/SP": ["4.Analysis", "5.SDTM"],
+    "Verification SP": ["8.Verification"],
+    "SDTM": ["5.SDTM"],
+    "Manager": ["4.Analysis", "5.SDTM", "8.Verification"],
+}
+
 LEGACY_STUDY_MAP = {
     "Trial STAT/SP": [3, 4, 5],
     "Verification SP": [3, 5, 8],
@@ -459,11 +466,10 @@ def generate_add_script(user_id: str, proj_raw: str, lv2: str, lv3: str, role: s
                 if not role_clean:
                     cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
                     return ' '.join(cmds)
-                if role_clean and (role_clean not in STUDY_ROLES or role_clean not in ROLE_MAP):
+                if role_clean and role_clean not in ISOLATED_STAT_IDMC_ROLE_MAP:
                     return ""
-                cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
                 if role_clean:
-                    for sub in ROLE_MAP[role_clean]:
+                    for sub in ISOLATED_STAT_IDMC_ROLE_MAP[role_clean]:
                         cmds.append(f"icacls '{psq(path_l3)}\\{psq(sub)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
             else:
                 cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm' /t;")
@@ -4978,10 +4984,8 @@ class AccessManager(QMainWindow):
         elif lv2_norm == "Isolated":
             if is_stat_idmc_lv3(lv3):
                 if is_stat_idmc_new_policy(proj):
-                    if role not in STUDY_ROLES:
-                        return False, f"{row+1}행: Isolated STAT_IDMC에서는 허용되지 않는 STATROLE '{role}'"
-                    if role not in ROLE_MAP:
-                        return False, f"{row+1}행: Isolated STAT_IDMC 신버전에서 STATROLE '{role}' 매핑 없음(ROLE_MAP 보강 필요)"
+                    if role not in ISOLATED_STAT_IDMC_ROLE_MAP:
+                        return False, f"{row+1}행: Isolated STAT_IDMC 신버전에서 STATROLE '{role}' 매핑 없음(ISOLATED_STAT_IDMC_ROLE_MAP 보강 필요)"
             elif is_new:
                 if role not in ISOLATED_ROLES:
                     return False, f"{row+1}행: Isolated에서는 허용되지 않는 STATROLE '{role}'"
