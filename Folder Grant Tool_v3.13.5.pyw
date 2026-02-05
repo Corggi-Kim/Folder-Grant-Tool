@@ -33,7 +33,7 @@ from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QPro
 from openpyxl import load_workbook
 
 APP_NAME = "Folder Grant Tool"
-APP_VERSION = "3.1.1"  #구조변경, 기능추가, 오류/버그수정
+APP_VERSION = "3.13.5"  #구조변경, 기능추가, 오류/버그수정
 APP_BUILD = "2026-02-04"
 APP_VERSION_STR = f"v{APP_VERSION}"
 
@@ -4985,13 +4985,13 @@ class AccessManager(QMainWindow):
             if is_stat_idmc_lv3(lv3):
                 if is_stat_idmc_new_policy(proj):
                     if role not in ISOLATED_STAT_IDMC_ROLE_MAP:
-                        return False, f"{row+1}행: Isolated STAT_IDMC 신버전에서 STATROLE '{role}' 매핑 없음(ISOLATED_STAT_IDMC_ROLE_MAP 보강 필요)"
+                        return False, f"{row+1}행: STAT_IDMC 폴더에 허용되지 않는 Role. 확인 필요. ('{role} = ROLE_MAP 매핑 없음')"
             elif is_new:
                 if role not in ISOLATED_ROLES:
                     return False, f"{row+1}행: Isolated에서는 허용되지 않는 STATROLE '{role}'"
             else:
                 if role != "Randomization Statistician":
-                    return False, f"{row+1}행: 레거시 Isolated는 'Randomization Statistician'만 가능 (현재 '{role}')"
+                    return False, f"{row+1}행: 과거 Isolated 폴더는 'Randomization Statistician'만 가능 (현재 '{role}')"
                 iso_path = build_path_l3(proj, lv2, lv3)
                 if not os.path.isdir(iso_path):
                     return False, f"{row+1}행: Isolated 경로 없음 → {iso_path}\n조치: 경로 확인/생성 후 다시 실행하세요."
