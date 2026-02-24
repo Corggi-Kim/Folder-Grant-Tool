@@ -169,10 +169,10 @@ STUDY_ROLES = {"Trial STAT/SP", "Verification SP", "SDTM", "Manager"}
 ISOLATED_ROLES = {"Randomization Statistician", "Blind Reviewer", "Unblind Reviewer"}
 
 ISOLATED_STAT_IDMC_ROLE_MAP: Dict[str, List[str]] = {
-    "Trial STAT/SP": ["4.Analysis", "5.SDTM"],
-    "Verification SP": ["8.Verification"],
-    "SDTM": ["5.SDTM"],
-    "Manager": ["4.Analysis", "5.SDTM", "8.Verification"],
+    "Trial STAT/SP": ["8.Verification"],
+    "Verification SP": ["4.Analysis", "5.SDTM"],
+    "SDTM": ["4.Analysis", "8.Verification"],
+    "Manager": [],
 }
 
 LEGACY_STUDY_MAP = {
@@ -470,8 +470,13 @@ def generate_add_script(user_id: str, proj_raw: str, lv2: str, lv3: str, role: s
                     return ""
                 if role_clean:
                     cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
-                    for sub in ISOLATED_STAT_IDMC_ROLE_MAP[role_clean]:
-                        cmds.append(f"icacls '{psq(path_l3)}\\{psq(sub)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
+                    blocked_subs = ISOLATED_STAT_IDMC_ROLE_MAP[role_clean]
+                    blocked_expr = "@(" + ",".join([f"'{psq(s)}'" for s in blocked_subs]) + ")"
+                    cmds.append(
+                        f"Get-ChildItem -Path '{psq(path_l3)}' -Directory | "
+                        f"Where-Object {{ {blocked_expr} -notcontains $_.Name }} | "
+                        f"ForEach-Object {{ icacls $_.FullName /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm' }};"
+                    )
             else:
                 cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm' /t;")
         elif is_new:
