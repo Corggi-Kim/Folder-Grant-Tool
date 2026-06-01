@@ -432,6 +432,8 @@ function New-LdapGroup([string]$groupSam, [string]$ouDn, [string]$description) {
     $dn = 'CN=' + (Escape-LdapRdn $groupSam) + ',' + $ouDn
     $request = New-Object System.DirectoryServices.Protocols.AddRequest($dn)
     Add-LdapAttribute $request 'objectClass' @('top', 'group')
+    Add-LdapAttribute $request 'cn' @($groupSam)
+    Add-LdapAttribute $request 'name' @($groupSam)
     Add-LdapAttribute $request 'sAMAccountName' @($groupSam)
     Add-LdapAttribute $request 'groupType' @('-2147483644')
     if ($description) { Add-LdapAttribute $request 'description' @($description) }
