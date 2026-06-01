@@ -33,8 +33,8 @@ from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QPro
 from openpyxl import load_workbook
 
 APP_NAME = "Folder Grant Tool"
-APP_VERSION = "3.1.3"  #구조변경, 기능추가, 오류/버그수정
-APP_BUILD = "2026-02-24"
+APP_VERSION = "3.1.4"  #구조변경, 기능추가, 오류/버그수정
+APP_BUILD = "2026-04-03"
 APP_VERSION_STR = f"v{APP_VERSION}"
 
 THEMES = {
@@ -121,7 +121,7 @@ CONF_DIR = r"C:\FGT\conf"
 DL_DIR = r"C:\FGT\ef"
 DEBUG_DIR = r"C:\FGT\debug"
 
-GROUP_OU_PATH = r"OU=Group Project Folder,OU=1.Management Object Group,OU=lskglobal,DC=lskglobal,DC=com"
+GROUP_OU_PATH = r"OU=Group Project Folder,OU=0.Management Object Group,OU=lskglobal,DC=lskglobal,DC=com"
 TEMPLATE_ROOT = r"\\LSK_S010\Study folder\_Template"
 
 CONF_FILE = os.path.join(CONF_DIR, "login.json")
@@ -3034,7 +3034,7 @@ class CreateWorker(QObject):
         study_all  = os.path.join(root_path, "study", "all")
 
         TEMPLATE_ROOT = r"\\LSK_S010\Study folder\_Template"
-        GROUP_OU_PATH = r"OU=Group Project Folder,OU=1.Management Object Group,OU=lskglobal,DC=lskglobal,DC=com"
+        GROUP_OU_PATH = r"OU=Group Project Folder,OU=0.Management Object Group,OU=lskglobal,DC=lskglobal,DC=com"
 
         ps = []
         ps.append("$ErrorActionPreference='Stop';")
