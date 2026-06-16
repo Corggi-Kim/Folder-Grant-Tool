@@ -69,7 +69,7 @@ HELP_TEXT = r"""[Folder Grant Tool 기능 설명]
   - BUS 로그인 아이디/비밀번호가 필요한 경우 [⚙ 설정] 창이 먼저 뜹니다.
 
 2) 설정
-  - [⚙ 설정]에서 BUS 로그인 계정을 입력하고 저장 여부를 선택할 수 있습니다.
+  - [⚙ 설정]에서 BUS 로그인 계정과 PowerShell/LDAP 작업 실행 계정을 각각 입력할 수 있습니다.
   - "저장"을 체크하면 다음 실행 시 계정을 다시 묻지 않습니다.
 
 3) 파일 불러오기
@@ -665,13 +665,18 @@ class SettingsDialog(QDialog):
             self._fail_tol_default = 5
 
         super().__init__(parent)
-        self.setWindowTitle("로그인 계정")
+        self.setWindowTitle("계정 설정")
         self.le_id = QLineEdit()
         self.le_pw = QLineEdit()
         self.le_pw.setEchoMode(QLineEdit.Password)
+        self.le_remote_id = QLineEdit()
+        self.le_remote_pw = QLineEdit()
+        self.le_remote_pw.setEchoMode(QLineEdit.Password)
         if saved:
             self.le_id.setText(saved.get("id",""))
             self.le_pw.setText(saved.get("pw",""))
+            self.le_remote_id.setText(saved.get("remote_id",""))
+            self.le_remote_pw.setText(saved.get("remote_pw",""))
 
         self.chk_save = QCheckBox("저장")
         self.chk_save.setChecked(bool(remembered))
@@ -694,8 +699,17 @@ class SettingsDialog(QDialog):
         self.sb_notify.setValue(int((saved or {}).get("notify_refresh_min", 10)))
         form.addRow("알림 리프레시(분)", self.sb_notify)
 
-        form.addRow("아이디", self.le_id)
-        form.addRow("비밀번호", self.le_pw)
+        bus_account_lbl = QLabel("BUS 계정 (요청 조회 및 완료 처리)")
+        bus_account_lbl.setStyleSheet("font-weight: bold;")
+        form.addRow(bus_account_lbl)
+        form.addRow("BUS 아이디", self.le_id)
+        form.addRow("BUS 비밀번호", self.le_pw)
+
+        remote_account_lbl = QLabel("작업 실행 계정 (PowerShell 및 LDAP)")
+        remote_account_lbl.setStyleSheet("font-weight: bold; margin-top: 6px;")
+        form.addRow(remote_account_lbl)
+        form.addRow("작업 아이디", self.le_remote_id)
+        form.addRow("작업 비밀번호", self.le_remote_pw)
         form.addRow("", self.chk_save)
         form.addRow("", self.chk_debug)
         form.addRow("폴더해제 실패 허용 개수", self.sb_tol)
@@ -725,6 +739,8 @@ class SettingsDialog(QDialog):
         return (
             self.le_id.text().strip(),
             self.le_pw.text().strip(),
+            self.le_remote_id.text().strip(),
+            self.le_remote_pw.text().strip(),
             self.chk_save.isChecked(),
             self.chk_debug.isChecked(),
             int(self.sb_tol.value()),
@@ -2523,10 +2539,14 @@ class NewItemsViewer(QDialog):
 
     def _manual_add(self, proj: str, name: str):
         parent = self.parent()
+        creds = getattr(parent, "creds", {}) if parent else {}
+        if not creds.get("remote_id") or not creds.get("remote_pw"):
+            QMessageBox.warning(self, "알림", "작업 실행 계정이 필요합니다. 설정에서 입력 후 다시 시도하세요.")
+            return
         ps_path = getattr(parent, "ps_path", shutil.which("pwsh") or shutil.which("powershell") or "powershell")
         ps_kind = getattr(parent, "ps_kind", "pwsh" if "pwsh" in os.path.basename(ps_path).lower() else "powershell")
 
-        worker = CreateWorker([], {}, ps_path, ps_kind)
+        worker = CreateWorker([], creds, ps_path, ps_kind)
         self._set_busy(True, f"{proj} 폴더/권한 생성 중…")
         ok, msg = worker._create_group_and_folder(proj, name)
         self._set_busy(False, "")
@@ -2705,7 +2725,10 @@ class NewItemsViewer(QDialog):
         parent = self.parent()
         creds = getattr(parent, "creds", {}) if parent else {}
         if not creds.get("id") or not creds.get("pw"):
-            QMessageBox.warning(self, "알림", "BUS 계정이 필요합니다. 설정에서 저장 후 다시 시도하세요.")
+            QMessageBox.warning(self, "알림", "BUS 계정이 필요합니다. 설정에서 입력 후 다시 시도하세요.")
+            return
+        if not creds.get("remote_id") or not creds.get("remote_pw"):
+            QMessageBox.warning(self, "알림", "작업 실행 계정이 필요합니다. 설정에서 입력 후 다시 시도하세요.")
             return
 
         ps_path = getattr(parent, "ps_path", shutil.which("pwsh") or shutil.which("powershell") or "powershell")
@@ -2742,7 +2765,7 @@ class CreateWorker(QObject):
         self._stop = True
 
     def _wrap_cmd_utf8(self, cmd: str) -> str:
-        return build_remote_server_command(cmd, self.creds.get("id", ""), self.creds.get("pw", ""), self.ps_kind)
+        return build_remote_server_command(cmd, self.creds.get("remote_id", ""), self.creds.get("remote_pw", ""), self.ps_kind)
 
     def _run_pwsh(self, cmd: str, timeout_ms=180000) -> (bool, str):
         from PyQt5.QtCore import QProcess
@@ -3195,6 +3218,10 @@ class CreateWorker(QObject):
 
         if not self.creds.get("id") or not self.creds.get("pw"):
             self.error.emit("BUS 계정(아이디/비밀번호) 누락")
+            self.finished.emit(0, total)
+            return
+        if not self.creds.get("remote_id") or not self.creds.get("remote_pw"):
+            self.error.emit("작업 실행 계정(아이디/비밀번호) 누락")
             self.finished.emit(0, total)
             return
 
@@ -4327,19 +4354,22 @@ class AccessManager(QMainWindow):
         self._log("로드 완료: " + (" , ".join(parts) if parts else "항목 없음"))
 
     def _load_creds(self):
-        self.creds = {"id":"", "pw":""}
+        self.creds = {"id":"", "pw":"", "remote_id":"", "remote_pw":""}
         try:
             if os.path.exists(CONF_FILE):
                 with open(CONF_FILE, "r", encoding="utf-8") as f:
                     self.creds = json.load(f)
                     self.creds.setdefault("debug", False)
+                    self.creds.setdefault("remote_id", "")
+                    self.creds.setdefault("remote_pw", "")
         except:
             pass
         self.remove_fail_tolerance = int(self.creds.get("remove_fail_tol", 5))
 
-    def _save_creds(self, id_, pw_, debug_):
+    def _save_creds(self, id_, pw_, remote_id_, remote_pw_, debug_):
         with open(CONF_FILE, "w", encoding="utf-8") as f:
-            json.dump({"id": id_, "pw": pw_, "debug": bool(debug_), "theme": getattr(self, "current_theme", "light")},
+            json.dump({"id": id_, "pw": pw_, "remote_id": remote_id_, "remote_pw": remote_pw_,
+                       "debug": bool(debug_), "theme": getattr(self, "current_theme", "light")},
                       f, ensure_ascii=False, indent=2)
 
     def closeEvent(self, e):
@@ -4400,12 +4430,14 @@ class AccessManager(QMainWindow):
         dlg = SettingsDialog(self, self.creds, remembered=remembered, debug_on=current_debug, fail_tol_default=current_tol)
 
         if dlg.exec_() == QDialog.Accepted:
-            uid, pw, do_save, debug_on, fail_tol, notify_mins = dlg.result()
+            uid, pw, remote_uid, remote_pw, do_save, debug_on, fail_tol, notify_mins = dlg.result()
             tol = dlg.get_fail_tol()
 
             self.creds = {
-                "id": uid if do_save else "",
-                "pw": pw if do_save else "",
+                "id": uid,
+                "pw": pw,
+                "remote_id": remote_uid,
+                "remote_pw": remote_pw,
                 "debug": bool(debug_on),
                 "remove_fail_tol": int(tol),
                 "notify_refresh_min": int(notify_mins),
@@ -4424,7 +4456,7 @@ class AccessManager(QMainWindow):
                 "notify_refresh_min": int(notify_mins),
             }
             if do_save:
-                data.update({"id": uid, "pw": pw})
+                data.update({"id": uid, "pw": pw, "remote_id": remote_uid, "remote_pw": remote_pw})
 
             try:
                 with open(CONF_FILE, "w", encoding="utf-8") as f:
@@ -4532,7 +4564,7 @@ class AccessManager(QMainWindow):
             self.table.setContextMenuPolicy(Qt.PreventContextMenu if running else Qt.CustomContextMenu)
 
     def _wrap_cmd_utf8(self, cmd: str) -> str:
-        return build_remote_server_command(cmd, self.creds.get("id", ""), self.creds.get("pw", ""), self.ps_kind)
+        return build_remote_server_command(cmd, self.creds.get("remote_id", ""), self.creds.get("remote_pw", ""), self.ps_kind)
 
     def _pick_powershell(self):
         p = shutil.which("pwsh")
@@ -5113,6 +5145,11 @@ class AccessManager(QMainWindow):
             QMessageBox.warning(self, "알림", "다른 작업이 실행 중입니다. 잠시 후 다시 시도하세요."); return
 
         dry = self.chk_dry.isChecked()
+        if not dry and (not self.creds.get("remote_id") or not self.creds.get("remote_pw")):
+            self._open_settings()
+            if not self.creds.get("remote_id") or not self.creds.get("remote_pw"):
+                QMessageBox.warning(self, "알림", "작업 실행 계정이 필요합니다.")
+                return
         seq = 0
         failed_msgs = []
         queue = []
