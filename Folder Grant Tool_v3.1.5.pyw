@@ -152,6 +152,7 @@ RELEASE_HINT_HEADERS = {
 
 SHARE_ROOT = r"\\LSK_S010\Study Folder\{proj_seg}\{lv2}\{lv3}"
 CLOSED_ROOT = r"\\192.168.1.95\Study_Closed"
+CLOSED_ARCHIVE_ROOT = r"\\192.168.1.95\Study_Archive"
 
 LEVEL3_CHOICES = ["ARS","CO","DM","ER","MW","PM","PV","RA","SSU","STAT","STAT_IDMC","ETC"]
 
@@ -371,7 +372,23 @@ def closed_segment_from_proj(proj_raw: str) -> str:
     return seg + (("A" + suf_digits) if suf_digits else "")
 
 def build_closed_path_from_proj(proj_raw: str) -> str:
-    return os.path.join(CLOSED_ROOT, closed_segment_from_proj(proj_raw))
+    resolved = resolve_closed_path_from_proj(proj_raw)
+    if resolved:
+        return resolved
+    return build_closed_candidate_paths_from_proj(proj_raw)[0]
+
+def build_closed_candidate_paths_from_proj(proj_raw: str) -> List[str]:
+    seg = closed_segment_from_proj(proj_raw)
+    return [
+        os.path.join(CLOSED_ROOT, seg),
+        os.path.join(CLOSED_ARCHIVE_ROOT, seg),
+    ]
+
+def resolve_closed_path_from_proj(proj_raw: str) -> str:
+    for path in build_closed_candidate_paths_from_proj(proj_raw):
+        if os.path.isdir(path):
+            return path
+    return ""
 
 def generate_add_script_closed(user_id: str, proj_raw: str) -> str:
     path = build_closed_path_from_proj(proj_raw)
@@ -4964,6 +4981,13 @@ class AccessManager(QMainWindow):
         if kind == "종료":
             if not proj:
                 return False, f"{row+1}행: 종료 과제 실행에 필요한 필드(proj) 누락"
+            path = resolve_closed_path_from_proj(proj)
+            if not path:
+                candidates = build_closed_candidate_paths_from_proj(proj)
+                return False, (
+                    f"{row+1}행: 종료 과제 경로를 찾을 수 없습니다.\n"
+                    f"확인 경로:\n- " + "\n- ".join(candidates)
+                )
             return True, ""
 
         role = self._get(row, self.COL_ROLE).strip()
