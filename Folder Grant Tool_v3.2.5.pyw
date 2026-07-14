@@ -3716,24 +3716,13 @@ class AccessManager(QMainWindow):
             sb = QStatusBar(self)
             self.setStatusBar(sb)
         self._statusbar = sb
+        self._statusbar.setSizeGripEnabled(False)
 
         self.prg = QProgressBar()
         self.prg.setRange(0,100)
         self.prg.setValue(0)
         self.prg.setTextVisible(False)
-        self.prg.setFixedHeight(4)
-        self.prg.setMinimumWidth(230)
-        self.prg.setStyleSheet("""
-            QProgressBar {
-                border: 0px;
-                background-color: rgba(128, 128, 128, 70);
-                max-height: 4px;
-                min-height: 4px;
-            }
-            QProgressBar::chunk {
-                background-color: #4A90E2;
-            }
-        """)
+        self.prg.setFixedSize(0, 0)
         self.prg.hide()
         self.status_label = QLabel("")
         self.status_label.setMinimumWidth(420)
@@ -3741,9 +3730,8 @@ class AccessManager(QMainWindow):
         self.progress_panel.setVisible(False)
         progress_layout = QVBoxLayout(self.progress_panel)
         progress_layout.setContentsMargins(0, 0, 0, 0)
-        progress_layout.setSpacing(3)
+        progress_layout.setSpacing(0)
         progress_layout.addWidget(self.status_label)
-        progress_layout.addWidget(self.prg)
         self._statusbar.addPermanentWidget(self.progress_panel, 1)
         self._progress_started_at = None
         self._progress_detail = ""
@@ -3812,7 +3800,7 @@ class AccessManager(QMainWindow):
         self.status_label.setText(" · ".join(parts))
         self.prg.setValue(max(0, min(100, pct)))
         self.progress_panel.setVisible(running or bool(getattr(self, "_progress_started_at", None)))
-        self.prg.setVisible(running or bool(getattr(self, "_progress_started_at", None)))
+        self.prg.hide()
 
     def _finish_progress_status(self, detail: str = "완료", stopped: bool = False):
         self._progress_running = False
