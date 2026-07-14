@@ -895,14 +895,16 @@ class BusSessionManager(QObject):
         if not self.is_ready():
             try:
                 self.countsReady.emit(getattr(self, "_last_counts", {}))
-            finally:
-                return
+            except Exception:
+                pass
+            return
         if getattr(self, "_busy", False):
 
             try:
                 self.countsReady.emit(getattr(self, "_last_counts", {}))
-            finally:
-                return
+            except Exception:
+                pass
+            return
 
         d = self.driver
         counts = {
