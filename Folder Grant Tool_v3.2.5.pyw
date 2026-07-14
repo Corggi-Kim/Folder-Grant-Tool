@@ -3821,6 +3821,15 @@ class AccessManager(QMainWindow):
         self.progress_panel.setVisible(False)
         self.prg.hide()
 
+    def _set_plain_status(self, message: str):
+        self._progress_running = False
+        self._progress_started_at = None
+        if self._progress_timer.isActive():
+            self._progress_timer.stop()
+        self.status_label.setText(message or "")
+        self.progress_panel.setVisible(bool(message))
+        self.prg.hide()
+
     def refresh_notifications(self):
         if hasattr(self, "watch_session") and self.watch_session and self.watch_session.is_ready():
             self.trigger_watcher_collect.emit()
@@ -3901,15 +3910,17 @@ class AccessManager(QMainWindow):
     def _on_new_downloaded(self, path: str, err: str):
         self._set_running_ui(False)
         if err:
+            self._set_plain_status("폴더 생성 요청 로드 실패")
             QMessageBox.critical(self, "오류", f"폴더 생성 요청 로드 실패: {err}")
             return
         header, data = _parse_html_best_table(path)
         if not header:
+            self._set_plain_status("표 데이터 없음")
             QMessageBox.warning(self, "안내", "표 데이터를 찾지 못했습니다.")
             return
         if getattr(self, "_newdlg", None):
             self._newdlg.set_data(header, data)
-        self.status_label.setText(f"폴더 생성 요청 {len(data)}건")
+        self._set_plain_status(f"폴더 생성 요청 {len(data)}건")
 
     def _create_group_and_base_acl(self, proj: str, lv2: str, lv3: str) -> (bool, str):
         try:
@@ -4298,9 +4309,9 @@ class AccessManager(QMainWindow):
 
     def _on_session_ready(self, ok: bool, msg: str):
         if ok:
-            self.status_label.setText("세션 준비됨")
+            self._set_plain_status("세션 준비됨")
         else:
-            self.status_label.setText(f"세션 미준비: {msg}")
+            self._set_plain_status(f"세션 미준비: {msg}")
 
         self._set_running_ui(False)
         cbs = getattr(self, "_pending_bus_callbacks", [])
@@ -4322,12 +4333,13 @@ class AccessManager(QMainWindow):
         
         if err:
             if err.strip() == "사용자 취소":
-                self.status_label.setText("요청 확인 취소됨")
+                self._set_plain_status("요청 확인 취소됨")
                 return
+            self._set_plain_status("로드 실패")
             QMessageBox.critical(self, "오류", f"로드 실패: {err}")
             return
         
-        self.status_label.setText("로드 완료")
+        self._set_plain_status("로드 완료")
         self.load_excel(path, append=False, silent=False)
         
         try:
@@ -4479,14 +4491,14 @@ class AccessManager(QMainWindow):
 
         if not self.session.is_ready():
             self._set_running_ui(True)
-            self.status_label.setText("세션 준비 중")
+            self._set_progress_status("세션 준비 중", "", 0, 0, running=True)
             self.trigger_session_start.emit()
 
             end = time.time() + 60
             while time.time() < end and self.isVisible():
                 QApplication.processEvents()
                 if self.session.is_ready():
-                    self.status_label.setText("세션 준비됨")
+                    self._set_plain_status("세션 준비됨")
                     break
                 time.sleep(0.05)
 
@@ -4498,7 +4510,7 @@ class AccessManager(QMainWindow):
         self.btn_request.setEnabled(False)
         self.btn_settings.setEnabled(False)
         self._set_running_ui(True)
-        self.status_label.setText("요청 확인 중")
+        self._set_progress_status("요청 확인 중", "", 0, 0, running=True)
         self.trigger_session_download.emit()
 
     def _clear_log(self):
