@@ -213,6 +213,29 @@ def resource_path(rel_path: str) -> str:
         base = os.path.abspath(".")
     return os.path.join(base, rel_path)
 
+
+
+def make_hidden_chrome_options(download_dir: str | None = None):
+    options = webdriver.ChromeOptions()
+    if download_dir:
+        prefs = {
+            "download.default_directory": download_dir,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True,
+        }
+        options.add_experimental_option("prefs", prefs)
+
+    # 알림 배지/요청 조회용 Selenium 세션은 UI 뒤에 빈 Chrome 창이 보이면 안 된다.
+    # 일부 PC/Chrome 조합에서 headless가 순간적으로 일반 창처럼 뜨는 경우가 있어
+    # headless와 함께 창 위치도 화면 밖으로 고정한다.
+    options.add_argument("--headless=new")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--window-size=1280,900")
+    options.add_argument("--window-position=-32000,-32000")
+    return options
+
 def _norm_k(h: str) -> str:
     return (h or "").strip().lower().replace(" ", "").replace("/", "").replace("_","")
 RELEASE_HINT_HEADERS_NORM = {_norm_k(h) for h in RELEASE_HINT_HEADERS}
@@ -870,16 +893,11 @@ class BusSessionManager(QObject):
 
     def collect_request_counts(self):
         if not self.is_ready():
-            try:
-                self.countsReady.emit(getattr(self, "_last_counts", {}))
-            finally:
-                return
+            self.countsReady.emit(getattr(self, "_last_counts", {}))
+            return
         if getattr(self, "_busy", False):
-
-            try:
-                self.countsReady.emit(getattr(self, "_last_counts", {}))
-            finally:
-                return
+            self.countsReady.emit(getattr(self, "_last_counts", {}))
+            return
 
         d = self.driver
         counts = {
@@ -1053,18 +1071,7 @@ class BusSessionManager(QObject):
         while attempt < self.MAX_INIT_RETRY and not self._cancel:
             attempt += 1
             try:
-                options = webdriver.ChromeOptions()
-                prefs = {
-                    "download.default_directory": self.dl_dir,
-                    "download.prompt_for_download": False,
-                    "download.directory_upgrade": True,
-                    "safebrowsing.enabled": True,
-                }
-                options.add_experimental_option("prefs", prefs)
-                options.add_argument("--headless=new")
-                options.add_argument("--disable-gpu")
-                options.add_argument("--no-sandbox")
-                options.add_argument("--window-size=1280,900")
+                options = make_hidden_chrome_options(self.dl_dir)
 
                 self.driver = webdriver.Chrome(options=options)
                 d = self.driver
@@ -2679,11 +2686,7 @@ class CreateWorker(QObject):
         bus_msg_title = ""
         bus_msg_body = ""
         try:
-            options = webdriver.ChromeOptions()
-            options.add_argument("--headless=new")
-            options.add_argument("--disable-gpu")
-            options.add_argument("--no-sandbox")
-            options.add_argument("--window-size=1280,900")
+            options = make_hidden_chrome_options()
             d = webdriver.Chrome(options=options)
 
             def normalize_text(s: str) -> str:
