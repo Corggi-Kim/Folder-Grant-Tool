@@ -33,8 +33,8 @@ from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QPro
 from openpyxl import load_workbook
 
 APP_NAME = "Folder Grant Tool"
-APP_VERSION = "3.1.5"  #구조변경, 기능추가, 오류/버그수정
-APP_BUILD = "2026-04-03"
+APP_VERSION = "3.2.5"  #구조변경, 기능추가, 오류/버그수정
+APP_BUILD = "2026-07-14"
 APP_VERSION_STR = f"v{APP_VERSION}"
 
 THEMES = {
@@ -227,9 +227,6 @@ def make_hidden_chrome_options(download_dir: str | None = None):
         }
         options.add_experimental_option("prefs", prefs)
 
-    # 알림 배지/요청 조회용 Selenium 세션은 UI 뒤에 빈 Chrome 창이 보이면 안 된다.
-    # 일부 PC/Chrome 조합에서 headless가 순간적으로 일반 창처럼 뜨는 경우가 있어
-    # headless와 함께 창 위치도 화면 밖으로 고정한다.
     options.add_argument("--headless=new")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
