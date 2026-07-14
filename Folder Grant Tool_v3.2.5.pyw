@@ -3725,13 +3725,14 @@ class AccessManager(QMainWindow):
         self.prg.setFixedSize(0, 0)
         self.prg.hide()
         self.status_label = QLabel("")
+        self.status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.status_label.setMinimumWidth(420)
         self.progress_panel = QWidget()
         self.progress_panel.setVisible(False)
         progress_layout = QVBoxLayout(self.progress_panel)
         progress_layout.setContentsMargins(0, 0, 0, 0)
         progress_layout.setSpacing(0)
-        progress_layout.addWidget(self.status_label)
+        progress_layout.addWidget(self.status_label, 0, Qt.AlignRight | Qt.AlignVCenter)
         self._statusbar.addPermanentWidget(self.progress_panel, 1)
         self._progress_started_at = None
         self._progress_detail = ""
