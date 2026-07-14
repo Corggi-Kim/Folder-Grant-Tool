@@ -2398,21 +2398,23 @@ class NewItemsViewer(QDialog):
         lay.addWidget(self.tbl); lay.addLayout(btns)
 
         self.status_lbl = QLabel("")
+        self.status_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.status_lbl.setMinimumWidth(420)
         self.prg = QProgressBar(self)
         self.prg.setRange(0, 0)
+        self.prg.setFixedSize(0, 0)
         self.prg.hide()
 
         bar = QHBoxLayout()
-        bar.addWidget(self.status_lbl)
         bar.addStretch()
-        bar.addWidget(self.prg)
+        bar.addWidget(self.status_lbl, 0, Qt.AlignRight | Qt.AlignVCenter)
         lay.addLayout(bar)
 
         self._last_worker_msg = ""
 
     def _set_busy(self, on: bool, msg: str = ""):
         self.status_lbl.setText(msg or "")
-        self.prg.setVisible(on)
+        self.prg.hide()
         self.btn_manual.setEnabled(not on)
         self.btn_create.setEnabled(not on)
         self.btn_refresh.setEnabled(not on)
