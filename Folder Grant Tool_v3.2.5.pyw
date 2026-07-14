@@ -3716,14 +3716,110 @@ class AccessManager(QMainWindow):
             sb = QStatusBar(self)
             self.setStatusBar(sb)
         self._statusbar = sb
+        self._statusbar.setSizeGripEnabled(False)
 
         self.prg = QProgressBar()
-        self.prg.setRange(0,0)
-        self.prg.setFixedWidth(160)
+        self.prg.setRange(0,100)
+        self.prg.setValue(0)
+        self.prg.setTextVisible(False)
+        self.prg.setFixedSize(0, 0)
         self.prg.hide()
         self.status_label = QLabel("")
-        self._statusbar.addPermanentWidget(self.status_label)
-        self._statusbar.addPermanentWidget(self.prg)
+        self.status_label.setMinimumWidth(420)
+        self.progress_panel = QWidget()
+        self.progress_panel.setVisible(False)
+        progress_layout = QVBoxLayout(self.progress_panel)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        progress_layout.setSpacing(0)
+        progress_layout.addWidget(self.status_label)
+        self._statusbar.addPermanentWidget(self.progress_panel, 1)
+        self._progress_started_at = None
+        self._progress_detail = ""
+        self._progress_project = ""
+        self._progress_done = 0
+        self._progress_total = 0
+        self._progress_running = False
+        self._progress_timer = QTimer(self)
+        self._progress_timer.setInterval(1000)
+        self._progress_timer.timeout.connect(self._refresh_progress_status)
+
+    def _format_elapsed(self) -> str:
+        if not getattr(self, "_progress_started_at", None):
+            return "00:00"
+        elapsed = max(0, int(time.time() - self._progress_started_at))
+        minutes, seconds = divmod(elapsed, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def _set_progress_status(self, detail: str, project: str = "", done: int | None = None,
+                             total: int | None = None, running: bool = True):
+        if done is not None:
+            self._progress_done = max(0, int(done))
+        if total is not None:
+            self._progress_total = max(0, int(total))
+        self._progress_detail = detail or ""
+        self._progress_project = project or ""
+        self._progress_running = bool(running)
+
+        if running and not getattr(self, "_progress_started_at", None):
+            self._progress_started_at = time.time()
+        if running and not self._progress_timer.isActive():
+            self._progress_timer.start()
+        self._refresh_progress_status()
+
+    def _refresh_progress_status(self):
+        total = max(0, int(getattr(self, "_progress_total", 0)))
+        done = max(0, int(getattr(self, "_progress_done", 0)))
+        running = bool(getattr(self, "_progress_running", False))
+        detail = getattr(self, "_progress_detail", "") or "처리 중"
+        project = getattr(self, "_progress_project", "") or ""
+
+        if total > 0:
+            if running:
+                current = min(total, done + 1)
+                prefix = f"처리 중 {current}/{total}"
+                pct = int((current / total) * 100)
+            else:
+                current = min(total, done)
+                prefix = f"완료 {current}/{total}" if done >= total else f"중지됨 {current}/{total}"
+                pct = int((current / total) * 100)
+        else:
+            prefix = detail
+            pct = 0 if running else 100
+
+        parts = [prefix]
+        if project:
+            parts.append(f"프로젝트 {project}")
+        if detail and detail != prefix:
+            parts.append(detail)
+        if running or getattr(self, "_progress_started_at", None):
+            parts.append(self._format_elapsed())
+
+        self.status_label.setText(" · ".join(parts))
+        self.prg.setValue(max(0, min(100, pct)))
+        self.progress_panel.setVisible(running or bool(getattr(self, "_progress_started_at", None)))
+        self.prg.hide()
+
+    def _finish_progress_status(self, detail: str = "완료", stopped: bool = False):
+        self._progress_running = False
+        if self._progress_timer.isActive():
+            self._progress_timer.stop()
+        if not stopped and self._progress_total:
+            self._progress_done = self._progress_total
+        self._progress_detail = detail or ("중지됨" if stopped else "완료")
+        self._refresh_progress_status()
+
+    def _hide_progress_status(self):
+        self._progress_running = False
+        self._progress_started_at = None
+        if self._progress_timer.isActive():
+            self._progress_timer.stop()
+        self.status_label.setText("")
+        self.prg.setValue(0)
+        self.progress_panel.setVisible(False)
+        self.prg.hide()
 
     def refresh_notifications(self):
         if hasattr(self, "watch_session") and self.watch_session and self.watch_session.is_ready():
@@ -4031,13 +4127,14 @@ class AccessManager(QMainWindow):
     def _start_next_bus_item(self):
         if self.stop_requested or not self._bus_queue:
             self._bus_mode = False
+            self._finish_progress_status("완료" if not self.stop_requested else "중지됨", stopped=self.stop_requested)
             self._set_running_ui(False)
-            self.status_label.setText("완료" if not self.stop_requested else "중지됨")
             self.stop_requested = False
             return
 
         t = self._bus_queue.pop(0)
         row = t.get('row', -1)
+        self._set_progress_status("BUS 완료 처리 중", t.get('proj', ''), self._bus_done, self._bus_total, running=True)
         if 0 <= row < self.table.rowCount():
             it = self.table.item(row, self.COL_STATUS)
             if it:
@@ -4127,14 +4224,13 @@ class AccessManager(QMainWindow):
         self.total_jobs = 0
         self.done_jobs = 0
 
-        self._set_running_ui(True)
-        self.status_label.setText(f"완료 처리 중 (대상 {len(targets)}건)")
         self._bus_mode = True
         self._bus_queue = targets[:]
         self._bus_total = len(self._bus_queue)
         self._bus_done = 0
+        self._progress_started_at = time.time()
         self._set_running_ui(True)
-        self.status_label.setText(f"완료 처리 중 {self._bus_done}/{self._bus_total}")
+        self._set_progress_status("BUS 완료 처리 중", "", self._bus_done, self._bus_total, running=True)
         self._start_next_bus_item()
 
     def _on_session_processed(self, results):
@@ -4179,11 +4275,11 @@ class AccessManager(QMainWindow):
 
         if lines:
             self._log("\n".join(lines))
-        self.status_label.setText(f"완료 처리 결과: 성공 {ok_cnt}건 / 실패 {fail_cnt}건")
+        self._set_progress_status(f"완료 처리 결과: 성공 {ok_cnt}건 / 실패 {fail_cnt}건", "", self._progress_done, self._progress_total, running=True)
 
         if self._bus_mode:
             self._bus_done += len(results or [])
-            self.status_label.setText(f"완료 처리 중 {self._bus_done}/{self._bus_total}")
+            self._set_progress_status("BUS 완료 처리 중", "", self._bus_done, self._bus_total, running=True)
             self.refresh_notifications()
             self._start_next_bus_item()
             return
@@ -4196,8 +4292,8 @@ class AccessManager(QMainWindow):
             if self.run_queue:
                 self._start_next_job()
             else:
+                self._finish_progress_status("완료")
                 self._set_running_ui(False)
-                self.status_label.setText("완료")
                 self.refresh_notifications()
 
     def _on_session_ready(self, ok: bool, msg: str):
@@ -4436,12 +4532,18 @@ class AccessManager(QMainWindow):
         self._waiting_for_bus = False
         self._pending_after_add_row = None
         self._set_running_ui(False)
-        self.status_label.setText("중지됨")
+        self._finish_progress_status("사용자 중지", stopped=True)
         self.btn_stop.setEnabled(False)
 
     def _set_running_ui(self, running: bool):
-        self.prg.setVisible(running)
-        self.status_label.setText("" if not running else f"처리중 {self.done_jobs}/{self.total_jobs}")
+        if running:
+            self._set_progress_status(
+                getattr(self, "_progress_detail", "") or "처리 중",
+                getattr(self, "_progress_project", ""),
+                getattr(self, "done_jobs", 0),
+                getattr(self, "total_jobs", 0),
+                running=True,
+            )
 
         to_disable = [
             getattr(self, "btn_manual", None),
@@ -4510,7 +4612,8 @@ class AccessManager(QMainWindow):
         self._set_running_ui(True)
         self._buf_out[self.current_seq] = []
         self.proc.start(self.ps_path, args)
-        self.status_label.setText(f"처리중 {self.done_jobs}/{self.total_jobs}")
+        action_detail = "폴더 권한 부여 중" if mode == "add" else "폴더 권한 제거 중"
+        self._set_progress_status(action_detail, proj, self.done_jobs, self.total_jobs, running=True)
 
     def _filter_log_lines(self, mode: str, raw: str):
         lines = [ (line or "").strip() for line in raw.splitlines() if (line or "").strip() ]
@@ -4681,13 +4784,19 @@ class AccessManager(QMainWindow):
             else:
                 self.table.item(self.current_row, self.COL_STATUS).setText("실패")
 
-        self.status_label.setText(f"처리중 {self.done_jobs}/{self.total_jobs}")
+        self._set_progress_status(
+            "완료 처리 대기 중" if self._waiting_for_bus else ("폴더 권한 부여 중" if self.current_mode == "add" else "폴더 권한 제거 중"),
+            self._current_target.get('proj', '') if getattr(self, "_current_target", None) else "",
+            self.done_jobs,
+            self.total_jobs,
+            running=True,
+        )
         self._retrying_after_group_create = False
         if not self._waiting_for_bus:
             if self.run_queue:
                 self._start_next_job()
             else:
-                self.status_label.setText("완료" if not getattr(self, "stop_requested", False) else "중지됨")
+                self._finish_progress_status("완료" if not getattr(self, "stop_requested", False) else "중지됨", stopped=getattr(self, "stop_requested", False))
                 self._set_running_ui(False)
                 self.stop_requested = False
 
@@ -5121,6 +5230,9 @@ class AccessManager(QMainWindow):
 
         self.total_jobs = len(queue)
         self.done_jobs = 0
+        self._progress_started_at = time.time()
+        self._progress_done = 0
+        self._progress_total = self.total_jobs
         self._set_running_ui(True)
         self.run_queue = queue
         self._start_next_job()
