@@ -13,7 +13,7 @@
 #    - C:\FGT\debug   : 디버그 파일
 # =====================================
 
-import sys, os, glob, datetime, subprocess, re, shutil, json, time, base64
+import sys, os, glob, datetime, subprocess, re, shutil, json, time
 import html as htmllib
 from typing import Dict, List
 from selenium import webdriver
@@ -33,8 +33,8 @@ from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QPro
 from openpyxl import load_workbook
 
 APP_NAME = "Folder Grant Tool"
-APP_VERSION = "3.1.3"  #구조변경, 기능추가, 오류/버그수정
-APP_BUILD = "2026-02-24"
+APP_VERSION = "3.1.5"  #구조변경, 기능추가, 오류/버그수정
+APP_BUILD = "2026-04-03"
 APP_VERSION_STR = f"v{APP_VERSION}"
 
 THEMES = {
@@ -69,7 +69,7 @@ HELP_TEXT = r"""[Folder Grant Tool 기능 설명]
   - BUS 로그인 아이디/비밀번호가 필요한 경우 [⚙ 설정] 창이 먼저 뜹니다.
 
 2) 설정
-  - [⚙ 설정]에서 BUS 로그인 계정과 PowerShell/LDAP 작업 실행 계정을 각각 입력할 수 있습니다.
+  - [⚙ 설정]에서 BUS 로그인 계정을 입력하고 저장 여부를 선택할 수 있습니다.
   - "저장"을 체크하면 다음 실행 시 계정을 다시 묻지 않습니다.
 
 3) 파일 불러오기
@@ -121,13 +121,8 @@ CONF_DIR = r"C:\FGT\conf"
 DL_DIR = r"C:\FGT\ef"
 DEBUG_DIR = r"C:\FGT\debug"
 
-GROUP_OU_PATH = r"OU=Group Project Folder,OU=1.Management Object Group,OU=lskglobal,DC=lskglobal,DC=com"
-REMOTE_FILE_SERVER = "192.168.1.10"
-REMOTE_CLOSED_SERVER = "192.168.1.95"
-LDAP_AD_SERVER = "192.168.1.11"
-LDAP_SEARCH_BASE = "DC=lskglobal,DC=com"
-REMOTE_STUDY_ROOT = r"D:\share\Study folder"
-TEMPLATE_ROOT = os.path.join(REMOTE_STUDY_ROOT, "_Template")
+GROUP_OU_PATH = r"OU=Group Project Folder,OU=0.Management Object Group,OU=lskglobal,DC=lskglobal,DC=com"
+TEMPLATE_ROOT = r"\\LSK_S010\Study folder\_Template"
 
 CONF_FILE = os.path.join(CONF_DIR, "login.json")
 LOGO_FILE = "logo.png"
@@ -155,9 +150,8 @@ RELEASE_HINT_HEADERS = {
     "해제요청자부서/팀", "해제요청자직책"
 }
 
-SHARE_ROOT = REMOTE_STUDY_ROOT + r"\{proj_seg}\{lv2}\{lv3}"
-# 종료 과제 ACL 명령은 REMOTE_CLOSED_SERVER에서 실행하므로 서버 로컬 경로를 사용합니다.
-CLOSED_ROOT = r"F:\Study_Closed"
+SHARE_ROOT = r"\\LSK_S010\Study Folder\{proj_seg}\{lv2}\{lv3}"
+CLOSED_ROOT = r"\\192.168.1.95\Study_Closed"
 
 LEVEL3_CHOICES = ["ARS","CO","DM","ER","MW","PM","PV","RA","SSU","STAT","STAT_IDMC","ETC"]
 
@@ -210,7 +204,7 @@ HEADER_ALIASES = {
 
 def build_root_from_proj(proj_raw: str) -> str:
     seg = proj_segment_for_folder(proj_raw)
-    return os.path.join(REMOTE_STUDY_ROOT, seg)
+    return r"\\LSK_S010\Study Folder\{}".format(seg)
 
 def resource_path(rel_path: str) -> str:
     try:
@@ -218,6 +212,29 @@ def resource_path(rel_path: str) -> str:
     except Exception:
         base = os.path.abspath(".")
     return os.path.join(base, rel_path)
+
+
+
+def make_hidden_chrome_options(download_dir: str | None = None):
+    options = webdriver.ChromeOptions()
+    if download_dir:
+        prefs = {
+            "download.default_directory": download_dir,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True,
+        }
+        options.add_experimental_option("prefs", prefs)
+
+    # 알림 배지/요청 조회용 Selenium 세션은 UI 뒤에 빈 Chrome 창이 보이면 안 된다.
+    # 일부 PC/Chrome 조합에서 headless가 순간적으로 일반 창처럼 뜨는 경우가 있어
+    # headless와 함께 창 위치도 화면 밖으로 고정한다.
+    options.add_argument("--headless=new")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--window-size=1280,900")
+    options.add_argument("--window-position=-32000,-32000")
+    return options
 
 def _norm_k(h: str) -> str:
     return (h or "").strip().lower().replace(" ", "").replace("/", "").replace("_","")
@@ -354,7 +371,7 @@ def closed_segment_from_proj(proj_raw: str) -> str:
     return seg + (("A" + suf_digits) if suf_digits else "")
 
 def build_closed_path_from_proj(proj_raw: str) -> str:
-    return CLOSED_ROOT + "\\" + closed_segment_from_proj(proj_raw)
+    return os.path.join(CLOSED_ROOT, closed_segment_from_proj(proj_raw))
 
 def generate_add_script_closed(user_id: str, proj_raw: str) -> str:
     path = build_closed_path_from_proj(proj_raw)
@@ -367,115 +384,13 @@ def generate_remove_script_closed(user_id: str, proj_raw: str) -> str:
 def psq(s: str) -> str:
     return (s or "").replace("'", "''")
 
-
-
-LDAP_REMOTE_PRELUDE = r"""
-Add-Type -AssemblyName System.DirectoryServices.Protocols
-$script:LdapConnection = $null
-function Get-LdapConnection {
-    if ($null -eq $script:LdapConnection) {
-        $script:LdapConnection = New-Object System.DirectoryServices.Protocols.LdapConnection($ldapServer)
-        $script:LdapConnection.AuthType = [System.DirectoryServices.Protocols.AuthType]::Negotiate
-        $script:LdapConnection.Credential = New-Object System.Net.NetworkCredential($ldapUser, $ldapPassword)
-        $script:LdapConnection.SessionOptions.ProtocolVersion = 3
-        $script:LdapConnection.Bind()
-    }
-    return $script:LdapConnection
-}
-function Escape-LdapFilter([string]$value) {
-    return $value.Replace('\', '\5c').Replace('*', '\2a').Replace('(', '\28').Replace(')', '\29').Replace([char]0, '\00')
-}
-function Escape-LdapRdn([string]$value) {
-    return $value.Replace('\', '\\').Replace(',', '\,').Replace('+', '\+').Replace('"', '\"').Replace('<', '\<').Replace('>', '\>').Replace(';', '\;').Replace('=', '\=').Replace('#', '\#')
-}
-function Find-LdapEntry([string]$filter, [string[]]$attrs) {
-    $request = New-Object System.DirectoryServices.Protocols.SearchRequest($ldapBase, $filter, [System.DirectoryServices.Protocols.SearchScope]::Subtree, $attrs)
-    $response = (Get-LdapConnection).SendRequest($request)
-    if ($response.Entries.Count -lt 1) { return $null }
-    return $response.Entries[0]
-}
-function Find-LdapGroup([string]$groupSam) {
-    $escaped = Escape-LdapFilter $groupSam
-    return Find-LdapEntry "(&(objectClass=group)(sAMAccountName=$escaped))" @('distinguishedName', 'description')
-}
-function Find-LdapUser([string]$userId) {
-    $escaped = Escape-LdapFilter $userId
-    $upn = Escape-LdapFilter ($userId + '@lskglobal.com')
-    return Find-LdapEntry "(&(objectClass=user)(|(sAMAccountName=$escaped)(userPrincipalName=$escaped)(userPrincipalName=$upn)))" @('distinguishedName')
-}
-function Test-LdapGroupExists([string]$groupSam) { return $null -ne (Find-LdapGroup $groupSam) }
-function Add-LdapGroupMember([string]$groupSam, [string]$userId) {
-    $group = Find-LdapGroup $groupSam; if ($null -eq $group) { throw "LDAP group not found: $groupSam" }
-    $user = Find-LdapUser $userId; if ($null -eq $user) { throw "LDAP user not found: $userId" }
-    $request = New-Object System.DirectoryServices.Protocols.ModifyRequest($group.DistinguishedName, [System.DirectoryServices.Protocols.DirectoryAttributeOperation]::Add, 'member', $user.DistinguishedName)
-    try { $null = (Get-LdapConnection).SendRequest($request) } catch [System.DirectoryServices.Protocols.DirectoryOperationException] { if ($_.Exception.Response.ResultCode -ne [System.DirectoryServices.Protocols.ResultCode]::AttributeOrValueExists) { throw } }
-}
-function Remove-LdapGroupMember([string]$groupSam, [string]$userId) {
-    $group = Find-LdapGroup $groupSam; if ($null -eq $group) { throw "LDAP group not found: $groupSam" }
-    $user = Find-LdapUser $userId; if ($null -eq $user) { throw "LDAP user not found: $userId" }
-    $request = New-Object System.DirectoryServices.Protocols.ModifyRequest($group.DistinguishedName, [System.DirectoryServices.Protocols.DirectoryAttributeOperation]::Delete, 'member', $user.DistinguishedName)
-    try { $null = (Get-LdapConnection).SendRequest($request) } catch [System.DirectoryServices.Protocols.DirectoryOperationException] { if ($_.Exception.Response.ResultCode -ne [System.DirectoryServices.Protocols.ResultCode]::NoSuchAttribute) { throw } }
-}
-function Get-LdapGroupDescription([string]$groupSam) {
-    $group = Find-LdapGroup $groupSam; if ($null -eq $group) { return '' }
-    if ($group.Attributes['description'] -and $group.Attributes['description'].Count -gt 0) { return [string]$group.Attributes['description'][0] }
-    return ''
-}
-function Add-LdapAttribute($request, [string]$name, [string[]]$values) {
-    $attribute = New-Object System.DirectoryServices.Protocols.DirectoryAttribute
-    $attribute.Name = $name
-    foreach ($value in $values) { $attribute.Add($value) | Out-Null }
-    $request.Attributes.Add($attribute) | Out-Null
-}
-function New-LdapGroup([string]$groupSam, [string]$ouDn, [string]$description) {
-    if (Test-LdapGroupExists $groupSam) { return }
-    $dn = 'CN=' + (Escape-LdapRdn $groupSam) + ',' + $ouDn
-    $request = New-Object System.DirectoryServices.Protocols.AddRequest($dn)
-    Add-LdapAttribute $request 'objectClass' @('top', 'group')
-    Add-LdapAttribute $request 'cn' @($groupSam)
-    Add-LdapAttribute $request 'name' @($groupSam)
-    Add-LdapAttribute $request 'sAMAccountName' @($groupSam)
-    Add-LdapAttribute $request 'groupType' @('-2147483644')
-    if ($description) { Add-LdapAttribute $request 'description' @($description) }
-    $null = (Get-LdapConnection).SendRequest($request)
-}
-"""
-
-def _ps_single_quote(value: str) -> str:
-    return (value or "").replace("'", "''")
-
-def remote_server_for_command(cmd: str) -> str:
-    """Route closed-project ACL commands to the archive server and all other commands to the Study server."""
-    return REMOTE_CLOSED_SERVER if CLOSED_ROOT.lower() in (cmd or "").lower() else REMOTE_FILE_SERVER
-
-def build_remote_server_command(cmd: str, user: str, pw: str, ps_kind: str) -> str:
-    """Run ACL commands on the matching file server and AD mutations over LDAP from that server."""
-    remote_server = remote_server_for_command(cmd)
-    remote_script = LDAP_REMOTE_PRELUDE + "\n" + cmd
-    payload = base64.b64encode(remote_script.encode("utf-8")).decode("ascii")
-    pre = "$OutputEncoding=[System.Text.Encoding]::UTF8; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
-    if ps_kind == "powershell":
-        pre += " chcp 65001 > $null;"
-    return (
-        pre
-        + " $sec = ConvertTo-SecureString '" + _ps_single_quote(pw) + "' -AsPlainText -Force;"
-        + " $cred = New-Object System.Management.Automation.PSCredential('" + _ps_single_quote(user) + "', $sec);"
-        + " Invoke-Command -ComputerName '" + remote_server + "' -Credential $cred -ScriptBlock {"
-        + " param($encoded,$ldapServer,$ldapBase,$ldapUser,$ldapPassword);"
-        + " $remote = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($encoded));"
-        + " & ([ScriptBlock]::Create($remote));"
-        + " } -ArgumentList '" + payload + "','" + LDAP_AD_SERVER + "','" + LDAP_SEARCH_BASE + "','"
-        + _ps_single_quote(user) + "','" + _ps_single_quote(pw) + "';"
-    )
-
-
 def pretty_cmd_lines(cmd: str) -> str:
     s = cmd
     s = re.sub(r';(?!\s*})', ';\n', s)
     s = re.sub(r'}\s*(?=if\b)', '}\n', s)
     s = re.sub(r'(?<!\n)\s*(?=\$fd\d+\s*=)', '\n', s)
     s = re.sub(r'(?<!\n)\s*(?=icacls\s+)', '\n', s, flags=re.IGNORECASE)
-    s = re.sub(r'(?<!\n)\s*(?=(Add|Remove)-LdapGroupMember\b)', '\n', s, flags=re.IGNORECASE)
+    s = re.sub(r'(?<!\n)\s*(?=(Add|Remove)-ADGroupMember\b)', '\n', s, flags=re.IGNORECASE)
     s = re.sub(r'[ \t]+\n', '\n', s)
     s = re.sub(r'(?m)^[ \t]+', '', s)
     s = re.sub(r'\n{2,}', '\n', s)
@@ -546,8 +461,8 @@ def generate_add_script(user_id: str, proj_raw: str, lv2: str, lv3: str, role: s
     cmds = []
 
     cmds.append(
-        f"try {{ Add-LdapGroupMember -GroupSam '{psq(group_name)}' -UserId '{psq(user_id)}' }} "
-        f"catch {{ throw ('Add-LdapGroupMember failed: ' + $_.Exception.Message) }};"
+        f"try {{ Add-ADGroupMember -Identity '{psq(group_name)}' -Members '{psq(user_id)}' -ErrorAction Stop }} "
+        f"catch {{ throw ('Add-ADGroupMember failed: ' + $_.Exception.Message) }};"
     )
 
     if is_lv3_etc(lv3):
@@ -618,7 +533,7 @@ def generate_remove_script(user_id: str, proj_raw: str, lv2: str, lv3: str, role
     group_name = format_group_name(proj_raw, lv2)
     path_l3 = build_path_l3(proj_raw, lv2, lv3)
     cmds = []
-    cmds.append(f"Remove-LdapGroupMember -GroupSam '{psq(group_name)}' -UserId '{psq(user_id)}';")
+    cmds.append(f"Remove-ADGroupMember -Identity '{psq(group_name)}' -Members '{psq(user_id)}' -Confirm:$false;")
 
     if is_lv3_etc(lv3):
         return " ".join(cmds)
@@ -665,22 +580,17 @@ class SettingsDialog(QDialog):
             self._fail_tol_default = 5
 
         super().__init__(parent)
-        self.setWindowTitle("계정 설정")
+        self.setWindowTitle("로그인 계정")
         self.le_id = QLineEdit()
         self.le_pw = QLineEdit()
         self.le_pw.setEchoMode(QLineEdit.Password)
-        self.le_remote_id = QLineEdit()
-        self.le_remote_pw = QLineEdit()
-        self.le_remote_pw.setEchoMode(QLineEdit.Password)
         if saved:
             self.le_id.setText(saved.get("id",""))
             self.le_pw.setText(saved.get("pw",""))
-            self.le_remote_id.setText(saved.get("remote_id",""))
-            self.le_remote_pw.setText(saved.get("remote_pw",""))
 
         self.chk_save = QCheckBox("저장")
         self.chk_save.setChecked(bool(remembered))
-
+        
         self.chk_debug = QCheckBox("디버그 모드")
         self.chk_debug.setChecked(bool(debug_on))
 
@@ -699,17 +609,8 @@ class SettingsDialog(QDialog):
         self.sb_notify.setValue(int((saved or {}).get("notify_refresh_min", 10)))
         form.addRow("알림 리프레시(분)", self.sb_notify)
 
-        bus_account_lbl = QLabel("BUS 계정 (요청 조회 및 완료 처리)")
-        bus_account_lbl.setStyleSheet("font-weight: bold;")
-        form.addRow(bus_account_lbl)
-        form.addRow("BUS 아이디", self.le_id)
-        form.addRow("BUS 비밀번호", self.le_pw)
-
-        remote_account_lbl = QLabel("작업 실행 계정 (PowerShell 및 LDAP)")
-        remote_account_lbl.setStyleSheet("font-weight: bold; margin-top: 6px;")
-        form.addRow(remote_account_lbl)
-        form.addRow("작업 아이디", self.le_remote_id)
-        form.addRow("작업 비밀번호", self.le_remote_pw)
+        form.addRow("아이디", self.le_id)
+        form.addRow("비밀번호", self.le_pw)
         form.addRow("", self.chk_save)
         form.addRow("", self.chk_debug)
         form.addRow("폴더해제 실패 허용 개수", self.sb_tol)
@@ -739,8 +640,6 @@ class SettingsDialog(QDialog):
         return (
             self.le_id.text().strip(),
             self.le_pw.text().strip(),
-            self.le_remote_id.text().strip(),
-            self.le_remote_pw.text().strip(),
             self.chk_save.isChecked(),
             self.chk_debug.isChecked(),
             int(self.sb_tol.value()),
@@ -762,7 +661,7 @@ class BusSessionManager(QObject):
     countsReady = pyqtSignal(dict)
 
     MAX_INIT_RETRY = 3
-    INIT_RETRY_BASE_DELAY = 2.0
+    INIT_RETRY_BASE_DELAY = 2.0     
 
     def __init__(self, dl_dir: str):
         super().__init__()
@@ -1146,7 +1045,7 @@ class BusSessionManager(QObject):
                 self.countsReady.emit(counts)
             except Exception:
                 pass
-
+            
     @pyqtSlot()
     def start(self):
         def _cleanup_driver(drv):
@@ -1177,18 +1076,7 @@ class BusSessionManager(QObject):
         while attempt < self.MAX_INIT_RETRY and not self._cancel:
             attempt += 1
             try:
-                options = webdriver.ChromeOptions()
-                prefs = {
-                    "download.default_directory": self.dl_dir,
-                    "download.prompt_for_download": False,
-                    "download.directory_upgrade": True,
-                    "safebrowsing.enabled": True,
-                }
-                options.add_experimental_option("prefs", prefs)
-                options.add_argument("--headless=new")
-                options.add_argument("--disable-gpu")
-                options.add_argument("--no-sandbox")
-                options.add_argument("--window-size=1280,900")
+                options = make_hidden_chrome_options(self.dl_dir)
 
                 self.driver = webdriver.Chrome(options=options)
                 d = self.driver
@@ -1211,7 +1099,7 @@ class BusSessionManager(QObject):
 
                 WebDriverWait(d, 10).until(EC.element_to_be_clickable((By.ID, "approverYn")))
                 Select(d.find_element(By.ID, "approverYn")).select_by_value("1")
-
+                
                 self._set_request_filter(REQ_GRANT)
 
                 self._ready = True
@@ -1545,7 +1433,7 @@ class BusSessionManager(QObject):
             )
         except Exception:
             pass
-
+            
     def _debug_dump(self, tag: str):
         if not self.debug_enabled:
             return
@@ -1563,7 +1451,7 @@ class BusSessionManager(QObject):
                 pass
         except Exception:
             pass
-
+        
     def _set_request_filter(self, reqtype: str):
         self._goto_progress_site()
         d = self.driver
@@ -1697,7 +1585,7 @@ class BusSessionManager(QObject):
             return True
 
         while tried < 200:
-            self._check_cancel("process")
+            self._check_cancel("process")            
             self._go_iframe()
             next_btn = None
             try:
@@ -1773,7 +1661,7 @@ class BusSessionManager(QObject):
                 self._wait_overlay_gone(10)
                 self._go_iframe()
                 return
-
+            
             page1 = d.find_elements(By.XPATH, "//a[normalize-space()='1'] | //button[normalize-space()='1']")
             if page1:
                 try:
@@ -1915,10 +1803,10 @@ class BusSessionManager(QObject):
 
                         xpath = f"//tbody/tr[{user_eq} and {code_pred}]"
                         cand_rows = d.find_elements(By.XPATH, xpath)
-
+                        
                         if (t.get('kind') or '').strip() != '종료':
                             cand_rows = self._narrow_by_path_strict(cand_rows, lv2, lv3, path_hint)
-
+                       
                         if not cand_rows:
                             self._debug_dump("no_rows_after_filter")
                             return False
@@ -2018,9 +1906,9 @@ class BusSessionManager(QObject):
                                 d.execute_script("arguments[0].click();", okbtn)
                         except TimeoutException:
                             pass
-
+                        
                         self._wait_overlay_gone(10)
-                        self._stabilize_grid()
+                        self._stabilize_grid()                        
                         return True
 
                     self._goto_first_page()
@@ -2235,7 +2123,7 @@ class ManualEntryDialog(QDialog):
         self.cb_lv2  = QComboBox()
         self.cb_lv3  = QComboBox()
         self.cb_role = QComboBox()
-
+        
         self.cb_reqtype.addItems([REQ_GRANT, REQ_RELEASE])
         self.cb_reqtype.setCurrentText(REQ_GRANT)
 
@@ -2253,8 +2141,8 @@ class ManualEntryDialog(QDialog):
         self.le_proj.textChanged.connect(self._refresh_role_candidates)
 
         form = QFormLayout()
-        form.addRow("구분*", self.cb_kind)
-        form.addRow("요청사항*", self.cb_reqtype)
+        form.addRow("구분*", self.cb_kind) 
+        form.addRow("요청사항*", self.cb_reqtype) 
         form.addRow("사번*", self.le_user)
         form.addRow("프로젝트코드*", self.le_proj)
         form.addRow("Level2*", self.cb_lv2)
@@ -2539,14 +2427,10 @@ class NewItemsViewer(QDialog):
 
     def _manual_add(self, proj: str, name: str):
         parent = self.parent()
-        creds = getattr(parent, "creds", {}) if parent else {}
-        if not creds.get("remote_id") or not creds.get("remote_pw"):
-            QMessageBox.warning(self, "알림", "작업 실행 계정이 필요합니다. 설정에서 입력 후 다시 시도하세요.")
-            return
         ps_path = getattr(parent, "ps_path", shutil.which("pwsh") or shutil.which("powershell") or "powershell")
         ps_kind = getattr(parent, "ps_kind", "pwsh" if "pwsh" in os.path.basename(ps_path).lower() else "powershell")
 
-        worker = CreateWorker([], creds, ps_path, ps_kind)
+        worker = CreateWorker([], {}, ps_path, ps_kind)
         self._set_busy(True, f"{proj} 폴더/권한 생성 중…")
         ok, msg = worker._create_group_and_folder(proj, name)
         self._set_busy(False, "")
@@ -2674,7 +2558,8 @@ class NewItemsViewer(QDialog):
                 wrapped = parent._wrap_cmd_utf8(cmd)
                 ps_path, _ = parent._pick_powershell()
             else:
-                return False, "원격 실행 설정을 제공하는 상위 창이 없습니다."
+                wrapped = cmd
+                ps_path = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
 
             p = QProcess(self)
             args = ["-NoLogo","-NoProfile","-ExecutionPolicy","Bypass","-Command", wrapped]
@@ -2712,7 +2597,7 @@ class NewItemsViewer(QDialog):
             w = t.cellWidget(r, 0)
             if not w: continue
             cb = w.findChild(QCheckBox)
-            if not (cb and cb.isChecked()):
+            if not (cb and cb.isChecked()): 
                 continue
             proj = (t.item(r, proj_col).text().strip() if t.item(r, proj_col) else "")
             name = (t.item(r, name_col).text().strip() if (name_col is not None and t.item(r, name_col)) else "")
@@ -2725,10 +2610,7 @@ class NewItemsViewer(QDialog):
         parent = self.parent()
         creds = getattr(parent, "creds", {}) if parent else {}
         if not creds.get("id") or not creds.get("pw"):
-            QMessageBox.warning(self, "알림", "BUS 계정이 필요합니다. 설정에서 입력 후 다시 시도하세요.")
-            return
-        if not creds.get("remote_id") or not creds.get("remote_pw"):
-            QMessageBox.warning(self, "알림", "작업 실행 계정이 필요합니다. 설정에서 입력 후 다시 시도하세요.")
+            QMessageBox.warning(self, "알림", "BUS 계정이 필요합니다. 설정에서 저장 후 다시 시도하세요.")
             return
 
         ps_path = getattr(parent, "ps_path", shutil.which("pwsh") or shutil.which("powershell") or "powershell")
@@ -2765,7 +2647,10 @@ class CreateWorker(QObject):
         self._stop = True
 
     def _wrap_cmd_utf8(self, cmd: str) -> str:
-        return build_remote_server_command(cmd, self.creds.get("remote_id", ""), self.creds.get("remote_pw", ""), self.ps_kind)
+        pre = "$OutputEncoding=[System.Text.Encoding]::UTF8; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+        if self.ps_kind == "powershell":
+            pre += " chcp 65001 > $null;"
+        return pre + " " + cmd
 
     def _run_pwsh(self, cmd: str, timeout_ms=180000) -> (bool, str):
         from PyQt5.QtCore import QProcess
@@ -2806,11 +2691,7 @@ class CreateWorker(QObject):
         bus_msg_title = ""
         bus_msg_body = ""
         try:
-            options = webdriver.ChromeOptions()
-            options.add_argument("--headless=new")
-            options.add_argument("--disable-gpu")
-            options.add_argument("--no-sandbox")
-            options.add_argument("--window-size=1280,900")
+            options = make_hidden_chrome_options()
             d = webdriver.Chrome(options=options)
 
             def normalize_text(s: str) -> str:
@@ -3160,15 +3041,19 @@ class CreateWorker(QObject):
         root_path  = build_root_from_proj(proj)
         study_all  = os.path.join(root_path, "study", "all")
 
+        TEMPLATE_ROOT = r"\\LSK_S010\Study folder\_Template"
+        GROUP_OU_PATH = r"OU=Group Project Folder,OU=0.Management Object Group,OU=lskglobal,DC=lskglobal,DC=com"
 
         ps = []
         ps.append("$ErrorActionPreference='Stop';")
         ps.append(
-            f"$g = Test-LdapGroupExists -GroupSam '{psq(group_name)}';"
+            f"$g = Get-ADGroup -Filter \"SamAccountName -eq '{psq(group_name)}'\";"
         )
         ps.append(
             f"if (-not $g) {{ "
-            f"New-LdapGroup -GroupSam '{psq(group_name)}' -OuDn '{psq(GROUP_OU_PATH)}' -Description '{psq(proj_name or '')}'; "
+            f"New-ADGroup -Name '{psq(group_name)}' -SamAccountName '{psq(group_name)}' "
+            f"-GroupCategory Security -GroupScope DomainLocal "
+            f"-Path '{psq(GROUP_OU_PATH)}' -Description '{psq(proj_name or '')}'; "
             f"Start-Sleep -Seconds 15; "
             f"}} else {{ Write-Host 'GROUP_EXISTS'; }}"
         )
@@ -3218,10 +3103,6 @@ class CreateWorker(QObject):
 
         if not self.creds.get("id") or not self.creds.get("pw"):
             self.error.emit("BUS 계정(아이디/비밀번호) 누락")
-            self.finished.emit(0, total)
-            return
-        if not self.creds.get("remote_id") or not self.creds.get("remote_pw"):
-            self.error.emit("작업 실행 계정(아이디/비밀번호) 누락")
             self.finished.emit(0, total)
             return
 
@@ -3528,7 +3409,7 @@ class AccessManager(QMainWindow):
 
         if hasattr(self, "table") and self.table and hasattr(self.table.horizontalHeader(), "_reposition"):
             self.table.horizontalHeader()._reposition()
-
+        
     def _toggle_theme(self):
         next_mode = "dark" if getattr(self, "current_theme", "light") == "light" else "light"
         self.apply_theme(next_mode)
@@ -3623,7 +3504,7 @@ class AccessManager(QMainWindow):
 
         self.debug_enabled = bool(self.creds.get("debug", False))
         self.session.set_debug(self.debug_enabled, DEBUG_DIR)
-
+        
     def _init_ui(self):
         main_layout = QVBoxLayout()
         header_bar = QHBoxLayout()
@@ -3693,7 +3574,7 @@ class AccessManager(QMainWindow):
 
         self.btn_newcheck = QPushButton("𝙉 신규 확인")
         self.btn_newcheck.setFont(QFont("Segoe UI", 9))
-        self.btn_newcheck.clicked.connect(self.open_new_viewer)
+        self.btn_newcheck.clicked.connect(self.open_new_viewer) 
 
         self.btn_request = QPushButton("🔍 요청 확인")
         self.btn_request.setFont(QFont("Segoe UI", 9))
@@ -3702,7 +3583,7 @@ class AccessManager(QMainWindow):
         self.btn_manual = QPushButton("📝 수동 입력")
         self.btn_manual.setFont(QFont("Segoe UI", 9))
         self.btn_manual.clicked.connect(self.open_manual_dialog)
-
+        
         self.btn_file = QPushButton("📂 파일 선택")
         self.btn_file.setFont(QFont("Segoe UI", 9))
         self.btn_file.clicked.connect(self.choose_file)
@@ -3710,7 +3591,7 @@ class AccessManager(QMainWindow):
         self.btn_settings = QPushButton("⚙ 설정")
         self.btn_settings.setFont(QFont("Segoe UI", 9))
         self.btn_settings.clicked.connect(self._open_settings)
-
+        
         #file_bar.addWidget(self.file_label)
         file_bar.addStretch()
         file_bar.addWidget(self.btn_newcheck)
@@ -3754,11 +3635,11 @@ class AccessManager(QMainWindow):
             header.geometriesChanged.connect(lambda: header.updateSection(self.COL_SELECT))
         except Exception:
             pass
-
+        
         main_layout.addWidget(self.table)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._open_table_menu)
-
+        
         btn_bar = QHBoxLayout()
 
         self.btn_clear_log = QPushButton("🗑 로그 지우기")
@@ -3800,7 +3681,7 @@ class AccessManager(QMainWindow):
         btn_bar.addWidget(self.btn_run_complete)
         btn_bar.addWidget(self.btn_stop)
         main_layout.addLayout(btn_bar)
-
+        
         self.log = QTextEdit()
         self.log.setAcceptRichText(False)
         self.log.setLineWrapMode(QTextEdit.WidgetWidth)
@@ -3932,13 +3813,23 @@ class AccessManager(QMainWindow):
             lines.append("$ErrorActionPreference='Stop';")
 
             if is_isolated:
-                lines.append(f"$desc = try {{ Get-LdapGroupDescription -GroupSam '{psq(base_group)}' }} catch {{ '' }};")
-                lines.append(f"New-LdapGroup -GroupSam '{psq(group_name)}' -OuDn '{psq(GROUP_OU_PATH)}' -Description $desc;")
+                lines.append(f"$desc = try {{ (Get-ADGroup -Identity '{psq(base_group)}' -Properties Description).Description }} catch {{ '' }};")
+                lines.append(
+                    "New-ADGroup "
+                    f"-Name '{psq(group_name)}' -SamAccountName '{psq(group_name)}' "
+                    "-GroupCategory Security -GroupScope DomainLocal "
+                    f"-Path '{psq(GROUP_OU_PATH)}' -Description $desc;"
+                )
                 lines.append("Start-Sleep -s 15;")
                 lines.append(f"if (Test-Path '{psq(root_path)}') {{ icacls '{psq(root_path)}' /grant '{psq(group_name)}:rx' | Out-Null; }}")
                 lines.append(f"if (Test-Path '{psq(isolated_path)}') {{ icacls '{psq(isolated_path)}' /grant '{psq(group_name)}:rx' | Out-Null; }}")
             else:
-                lines.append(f"New-LdapGroup -GroupSam '{psq(group_name)}' -OuDn '{psq(GROUP_OU_PATH)}' -Description '';")
+                lines.append(
+                    "New-ADGroup "
+                    f"-Name '{psq(group_name)}' -SamAccountName '{psq(group_name)}' "
+                    "-GroupCategory Security -GroupScope DomainLocal "
+                    f"-Path '{psq(GROUP_OU_PATH)}' -Description '';"
+                )
                 lines.append(f"if (!(Test-Path '{psq(root_path)}')) {{ robocopy '{psq(TEMPLATE_ROOT)}' '{psq(root_path)}' *.* /E /COPYALL | Out-Null; }}")
                 lines.append(f"if (Test-Path '{psq(root_path)}') {{ icacls '{psq(root_path)}' /grant '{psq(group_name)}:(ci)(oi)rx' | Out-Null; }}")
                 lines.append(f"if (Test-Path '{psq(os.path.join(root_path,'study','all'))}') {{ icacls '{psq(os.path.join(root_path,'study','all'))}' /grant '{psq(group_name)}:(ci)(oi)rxm' | Out-Null; }}")
@@ -3964,7 +3855,7 @@ class AccessManager(QMainWindow):
             out = bytes(p.readAllStandardOutput()).decode("utf-8","ignore")
             err = bytes(p.readAllStandardError()).decode("utf-8","ignore")
             if rc != 0:
-                return False, (err.strip() or out.strip() or f"LDAP 그룹 생성 실패(code={rc})")
+                return False, (err.strip() or out.strip() or f"New-ADGroup 실패(code={rc})")
 
             self._log(f"[보안그룹 생성] {group_name} 완료")
             return True, "OK"
@@ -4144,7 +4035,7 @@ class AccessManager(QMainWindow):
         self._pending_after_add_row = None
         self.stop_requested = False
         self.auto_complete_after_add = self.chk_auto_complete.isChecked()
-
+        
         if self.table.rowCount() == 0:
             QMessageBox.information(self, "알림", "대상이 없습니다.")
             return
@@ -4316,17 +4207,17 @@ class AccessManager(QMainWindow):
         self._set_running_ui(False)
         self.btn_request.setEnabled(True)
         self.btn_settings.setEnabled(True)
-
+        
         if err:
             if err.strip() == "사용자 취소":
                 self.status_label.setText("요청 확인 취소됨")
                 return
             QMessageBox.critical(self, "오류", f"로드 실패: {err}")
             return
-
+        
         self.status_label.setText("로드 완료")
         self.load_excel(path, append=False, silent=False)
-
+        
         try:
             end_combined = os.path.join(DL_DIR, "종료권한리스트_합본.xls")
             normal_combined = os.path.join(DL_DIR, "권한리스트_합본.xls")
@@ -4354,22 +4245,19 @@ class AccessManager(QMainWindow):
         self._log("로드 완료: " + (" , ".join(parts) if parts else "항목 없음"))
 
     def _load_creds(self):
-        self.creds = {"id":"", "pw":"", "remote_id":"", "remote_pw":""}
+        self.creds = {"id":"", "pw":""}
         try:
             if os.path.exists(CONF_FILE):
                 with open(CONF_FILE, "r", encoding="utf-8") as f:
                     self.creds = json.load(f)
                     self.creds.setdefault("debug", False)
-                    self.creds.setdefault("remote_id", "")
-                    self.creds.setdefault("remote_pw", "")
         except:
             pass
         self.remove_fail_tolerance = int(self.creds.get("remove_fail_tol", 5))
 
-    def _save_creds(self, id_, pw_, remote_id_, remote_pw_, debug_):
+    def _save_creds(self, id_, pw_, debug_):
         with open(CONF_FILE, "w", encoding="utf-8") as f:
-            json.dump({"id": id_, "pw": pw_, "remote_id": remote_id_, "remote_pw": remote_pw_,
-                       "debug": bool(debug_), "theme": getattr(self, "current_theme", "light")},
+            json.dump({"id": id_, "pw": pw_, "debug": bool(debug_), "theme": getattr(self, "current_theme", "light")},
                       f, ensure_ascii=False, indent=2)
 
     def closeEvent(self, e):
@@ -4394,7 +4282,7 @@ class AccessManager(QMainWindow):
 
             if hasattr(self, "watch_session"):
                 self.trigger_watcher_stop.emit()
-
+                
             if hasattr(self, "watch_thread") and self.watch_thread:
                 self.watch_thread.quit()
                 self.watch_thread.wait(1500)
@@ -4419,7 +4307,7 @@ class AccessManager(QMainWindow):
                         pass
         except Exception:
             pass
-
+        
         super().closeEvent(e)
 
     def _open_settings(self):
@@ -4430,14 +4318,12 @@ class AccessManager(QMainWindow):
         dlg = SettingsDialog(self, self.creds, remembered=remembered, debug_on=current_debug, fail_tol_default=current_tol)
 
         if dlg.exec_() == QDialog.Accepted:
-            uid, pw, remote_uid, remote_pw, do_save, debug_on, fail_tol, notify_mins = dlg.result()
+            uid, pw, do_save, debug_on, fail_tol, notify_mins = dlg.result()
             tol = dlg.get_fail_tol()
 
             self.creds = {
-                "id": uid,
-                "pw": pw,
-                "remote_id": remote_uid,
-                "remote_pw": remote_pw,
+                "id": uid if do_save else "",
+                "pw": pw if do_save else "",
                 "debug": bool(debug_on),
                 "remove_fail_tol": int(tol),
                 "notify_refresh_min": int(notify_mins),
@@ -4456,7 +4342,7 @@ class AccessManager(QMainWindow):
                 "notify_refresh_min": int(notify_mins),
             }
             if do_save:
-                data.update({"id": uid, "pw": pw, "remote_id": remote_uid, "remote_pw": remote_pw})
+                data.update({"id": uid, "pw": pw})
 
             try:
                 with open(CONF_FILE, "w", encoding="utf-8") as f:
@@ -4509,7 +4395,7 @@ class AccessManager(QMainWindow):
     def _stop_all(self):
         self.run_queue = []
         self.stop_requested = True
-
+        
         try:
             if hasattr(self, "session"):
                 self.trigger_session_cancel.emit()
@@ -4564,7 +4450,10 @@ class AccessManager(QMainWindow):
             self.table.setContextMenuPolicy(Qt.PreventContextMenu if running else Qt.CustomContextMenu)
 
     def _wrap_cmd_utf8(self, cmd: str) -> str:
-        return build_remote_server_command(cmd, self.creds.get("remote_id", ""), self.creds.get("remote_pw", ""), self.ps_kind)
+        pre = "$OutputEncoding=[System.Text.Encoding]::UTF8; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+        if self.ps_kind == "powershell":
+            pre = pre + " chcp 65001 > $null;"
+        return pre + " " + cmd
 
     def _pick_powershell(self):
         p = shutil.which("pwsh")
@@ -4576,14 +4465,14 @@ class AccessManager(QMainWindow):
         if self.stop_requested or not self.run_queue:
             self._set_running_ui(False)
             return
-
+        
         (seq, row, cmd, pretty, mode, reqtype, user, proj, lv2, lv3, path) = self.run_queue.pop(0)
         self.run_queue_cmd = cmd
         self.run_queue_pretty = pretty
         self.current_mode = mode
         self.current_row = row
         self.current_seq = seq
-        kind = (self._get(row, self.COL_KIND) or "").strip()
+        kind = (self._get(row, self.COL_KIND) or "").strip()    
         self._current_reqtype = reqtype
         self._current_target = {'row': row, 'kind': kind, 'user': user, 'proj': proj, 'lv2': lv2, 'lv3': lv3, 'path': path, 'req': reqtype}
         is_closed = (not (lv2 or "").strip()) and (not (lv3 or "").strip())
@@ -4614,7 +4503,7 @@ class AccessManager(QMainWindow):
             keep = []
 
             for s in lines:
-                if ("ERROR" in s or "Error" in s or
+                if ("ERROR" in s or "Error" in s or 
                     "Access is denied" in s or "Access denied" in s or "denied" in s.lower()):
                     keep.append(s)
 
@@ -4693,8 +4582,7 @@ class AccessManager(QMainWindow):
         buf_text = "\n".join([b.split("#", 1)[-1].strip() if "#" in b else b for b in (buf or [])])
 
         if self.current_mode == "add" and effective_code != 0:
-            if (("개체를 찾을 수 없습니다" in buf_text) or ("Cannot find an object with identity" in buf_text)
-                    or ("LDAP group not found:" in buf_text)):
+            if ("개체를 찾을 수 없습니다" in buf_text) or ("Cannot find an object with identity" in buf_text):
                 missing_group = True
 
         if missing_group and not getattr(self, "_retrying_after_group_create", False):
@@ -4792,7 +4680,7 @@ class AccessManager(QMainWindow):
             dlg = ManualEntryDialog(self)
             if dlg.exec_() == QDialog.Accepted and dlg.result_row:
                 reqtype, user, proj, lv2, lv3, dept, role, kind = dlg.result_row
-                self.add_table_row(reqtype, user, proj, lv2, lv3, dept, role, kind)
+                self.add_table_row(reqtype, user, proj, lv2, lv3, dept, role, kind)   
         except Exception as e:
             self._log(f"[수동입력 오픈 예외] {e}")
             QMessageBox.critical(self, "오류", f"수동 입력 다이얼로그 실행 오류:\n{e}")
@@ -4805,7 +4693,7 @@ class AccessManager(QMainWindow):
 
             chk = QCheckBox()
             chk.setChecked(True)
-
+            
             wrapper = QWidget()
             layout = QHBoxLayout(wrapper)
             layout.addWidget(chk)
@@ -4814,7 +4702,7 @@ class AccessManager(QMainWindow):
             self.table.setCellWidget(r, self.COL_SELECT, wrapper)
 
             vals = [kind, reqtype or REQ_GRANT, user, "", proj, lv2, lv3, dept or "", role or "", "대기"]
-
+            
             for j, val in enumerate(vals, start=1):
                 col = j
                 it = QTableWidgetItem(str(val))
@@ -4884,7 +4772,7 @@ class AccessManager(QMainWindow):
             ext = os.path.splitext(file_path)[1].lower()
 
             start_offset = self.table.rowCount() if append else 0
-
+            
             rows = []
 
             if ext == ".xlsx":
@@ -4892,10 +4780,10 @@ class AccessManager(QMainWindow):
                 ws = wb.active
                 header_raw = [str(c.value) if c.value is not None else "" for c in ws[1]]
                 colmap = auto_map_columns(header_raw)
-
+                
                 is_end = any(("열람" in (str(h) or "")) for h in header_raw)
                 kind = "종료" if is_end else "진행"
-
+                
                 required = {"user", "proj"} if is_end else {"user", "proj", "level2", "level3"}
                 missing = [k for k in required if k not in colmap]
                 if missing:
@@ -4904,11 +4792,11 @@ class AccessManager(QMainWindow):
 
                 def gv(row, key, default=""):
                     i = colmap.get(key)
-                    if i is None:
+                    if i is None: 
                         return default
                     v = row[i] if i < len(row) else None
                     return (str(v).strip() if v is not None else default)
-
+                
                 for r in ws.iter_rows(min_row=2, values_only=True):
                     if not any(r):
                         continue
@@ -4919,12 +4807,12 @@ class AccessManager(QMainWindow):
                     lv3     = "" if is_end else gv(r, "level3")
                     role    = gv(r, "role") if not is_end else ""
                     dept    = gv(r, "dept")
-
+                    
                     if not user_id or not proj:
                         continue
                     if not is_end and (not lv2 or not lv3):
                         continue
-
+                    
                     reqtype = REQ_RELEASE if _is_release_row_by_values(list(r), header_raw) else REQ_GRANT
                     path = build_path_l3(proj, lv2, lv3)
                     rows.append((kind, reqtype, user_id, name, proj, lv2, lv3, dept, role, "대기"))
@@ -4934,12 +4822,12 @@ class AccessManager(QMainWindow):
                 if not header_raw:
                     self._log("엑셀 로드 실패: .xls(HTML) 테이블을 찾지 못했습니다.")
                     return
-
+                
                 colmap = auto_map_columns(header_raw)
 
                 is_end = any(("열람" in (str(h) or "")) for h in header_raw)
                 kind = "종료" if is_end else "진행"
-
+                
                 required = {"user", "proj"} if is_end else {"user", "proj", "level2", "level3"}
                 missing = [k for k in required if k not in colmap]
                 if missing:
@@ -4948,7 +4836,7 @@ class AccessManager(QMainWindow):
 
                 def gv(row, key, default=""):
                     i = colmap.get(key)
-                    if i is None:
+                    if i is None: 
                         return default
                     v = row[i] if i < len(row) else None
                     return (str(v).strip() if v is not None else default)
@@ -4961,12 +4849,12 @@ class AccessManager(QMainWindow):
                     lv3     = "" if is_end else gv(r, "level3")
                     role    = gv(r, "role") if not is_end else ""
                     dept    = gv(r, "dept")
-
+                    
                     if not user_id or not proj:
                         continue
                     if not is_end and (not lv2 or not lv3):
                         continue
-
+                    
                     reqtype = REQ_RELEASE if _is_release_row_by_values(r, header_raw) else REQ_GRANT
                     path = build_path_l3(proj, lv2, lv3)
                     rows.append((kind, reqtype, user_id, name, proj, lv2, lv3, dept, role, "대기"))
@@ -4984,10 +4872,10 @@ class AccessManager(QMainWindow):
 
             for i, row in enumerate(rows):
                 r = base + i
-
+                
                 chk = QCheckBox()
                 chk.setChecked(True)
-
+                
                 wrapper = QWidget()
                 layout = QHBoxLayout(wrapper)
                 layout.addWidget(chk)
@@ -5022,23 +4910,23 @@ class AccessManager(QMainWindow):
             st = self.table.item(row, self.COL_STATUS)
             if st:
                 st.setText("검증필요")
-
+        
     def _open_table_menu(self, pos):
         row = self.table.indexAt(pos).row()
         m = QMenu(self)
         act_del_row = m.addAction("행 삭제")
         act_del_sel = m.addAction("선택 행 삭제")
         act_del_all = m.addAction("전체 삭제")
-
+        
         gpos = self.table.viewport().mapToGlobal(pos)
         act = m.exec_(gpos)
-
+        
         if act == act_del_row:
             self._delete_row(row)
         elif act == act_del_sel:
             self._delete_checked_rows()
         elif act == act_del_all:
-            self._delete_all_rows()
+            self._delete_all_rows()     
 
     def _delete_all_rows(self):
         self.table.blockSignals(True)
@@ -5145,11 +5033,6 @@ class AccessManager(QMainWindow):
             QMessageBox.warning(self, "알림", "다른 작업이 실행 중입니다. 잠시 후 다시 시도하세요."); return
 
         dry = self.chk_dry.isChecked()
-        if not dry and (not self.creds.get("remote_id") or not self.creds.get("remote_pw")):
-            self._open_settings()
-            if not self.creds.get("remote_id") or not self.creds.get("remote_pw"):
-                QMessageBox.warning(self, "알림", "작업 실행 계정이 필요합니다.")
-                return
         seq = 0
         failed_msgs = []
         queue = []
@@ -5183,7 +5066,7 @@ class AccessManager(QMainWindow):
             lv2  = self._get(r, self.COL_LV2)
             lv3  = self._get(r, self.COL_LV3)
             role = self._get(r, self.COL_ROLE)
-
+            
             if kind == "종료":
                 path = build_closed_path_from_proj(proj)
                 cmd  = generate_add_script_closed(user, proj) if mode == "add" else generate_remove_script_closed(user, proj)
@@ -5238,7 +5121,7 @@ _sys.excepthook = _excepthook
 
 if __name__ == "__main__":
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-
+    
     app = QApplication(sys.argv)
     app.setFont(QFont("Segoe UI", 9))
     window = AccessManager()
