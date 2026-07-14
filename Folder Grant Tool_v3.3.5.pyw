@@ -33,7 +33,7 @@ from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QPro
 from openpyxl import load_workbook
 
 APP_NAME = "Folder Grant Tool"
-APP_VERSION = "3.2.5"  #구조변경, 기능추가, 오류/버그수정
+APP_VERSION = "3.3.5"  #구조변경, 기능추가/수정, 오류/버그수정
 APP_BUILD = "2026-07-14"
 APP_VERSION_STR = f"v{APP_VERSION}"
 
