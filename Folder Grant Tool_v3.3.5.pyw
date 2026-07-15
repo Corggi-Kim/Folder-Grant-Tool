@@ -11,6 +11,9 @@
 #    - C:\FGT\conf      : 설정(login.json, theme 등)
 #    - C:\FGT\ef         : 엑셀파일 다운로드
 #    - C:\FGT\debug   : 디버그 파일
+#
+# 3) EXE 압축 시 모듈 임포트 필요 (--collect-all 옵션)
+#    - selenium
 # =====================================
 
 import sys, os, glob, datetime, subprocess, re, shutil, json, time
