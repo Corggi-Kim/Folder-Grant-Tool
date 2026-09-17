@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -52,3 +53,42 @@ class ErrorDetail(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: ErrorDetail
+
+
+class JobStepResponse(BaseModel):
+    order: int
+    type: str
+    status: str
+    target: str
+    description: str
+    details: dict
+    result: dict | None
+    error_code: str | None
+    error_message: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+class JobResponse(BaseModel):
+    job_id: str
+    request_id: str
+    replayed: bool = False
+    status: str
+    executor_mode: Literal["mock"] = "mock"
+    operation: str
+    project_status: str
+    requested_by: str
+    cancel_requested: bool
+    result: dict | None
+    error_code: str | None
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    steps: list[JobStepResponse]
+
+
+class CancelJobRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    requested_by: str = Field(min_length=1, max_length=100)

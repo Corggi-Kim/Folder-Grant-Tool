@@ -24,6 +24,9 @@ class ServiceMetadata(Base):
 
 
 def create_database(settings: Settings):
+    # Import model mappings before create_all so all tables are registered.
+    from folder_grant_api.infrastructure import models  # noqa: F401
+
     settings.ensure_local_directories()
     connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
     engine = create_engine(settings.database_url, connect_args=connect_args)
