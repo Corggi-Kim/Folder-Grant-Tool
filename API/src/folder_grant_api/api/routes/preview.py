@@ -1,11 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from folder_grant_api.api.security import require_api_key
 from folder_grant_api.domain.operation_plan import OperationPlan, PlanValidationError, build_operation_plan
 from folder_grant_api.domain.project_codes import InvalidProjectCode
 from folder_grant_api.schemas.access_job import AccessJobRequest, ErrorResponse, PreviewResponse
 from folder_grant_api.settings import Settings, get_settings
 
-router = APIRouter(prefix="/api/v1/access-jobs", tags=["access-jobs"])
+router = APIRouter(
+    prefix="/api/v1/access-jobs",
+    tags=["access-jobs"],
+    dependencies=[Depends(require_api_key)],
+)
 
 
 def create_plan(payload: AccessJobRequest, settings: Settings | None = None) -> OperationPlan:

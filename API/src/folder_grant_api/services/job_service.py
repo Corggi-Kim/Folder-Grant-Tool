@@ -14,6 +14,10 @@ class JobNotCancellableError(RuntimeError):
     pass
 
 
+class RequestIdConflictError(RuntimeError):
+    pass
+
+
 class JobService:
     def __init__(self, session: Session):
         self.repository = JobRepository(session)
@@ -21,6 +25,8 @@ class JobService:
     def register(self, request: AccessJobRequest, plan: OperationPlan) -> tuple[JobRecord, bool]:
         existing = self.repository.get_by_request_id(request.request_id)
         if existing:
+            if existing.request_payload != request.model_dump(mode="json"):
+                raise RequestIdConflictError(request.request_id)
             return existing, True
         try:
             return self.repository.create(request, plan), False
@@ -28,6 +34,8 @@ class JobService:
             existing = self.repository.get_by_request_id(request.request_id)
             if existing is None:
                 raise
+            if existing.request_payload != request.model_dump(mode="json"):
+                raise RequestIdConflictError(request.request_id)
             return existing, True
 
     def get(self, job_id: str) -> JobRecord:

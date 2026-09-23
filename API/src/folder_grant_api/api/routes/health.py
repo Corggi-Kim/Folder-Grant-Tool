@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from folder_grant_api.api.security import require_api_key
 from folder_grant_api.infrastructure.database import check_database
 
 router = APIRouter(tags=["health"])
@@ -10,7 +11,7 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "folder-grant-api"}
 
 
-@router.get("/ready")
+@router.get("/ready", dependencies=[Depends(require_api_key)])
 def ready(request: Request) -> dict[str, str]:
     try:
         check_database(request.app.state.database_engine)
