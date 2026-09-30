@@ -96,6 +96,7 @@ def test_project_verification_checks_group_paths_and_acls() -> None:
     assert "PROJECT_ROOT_NOT_FOUND" in command
     assert "STUDY_ALL_NOT_FOUND" in command
     assert "ROOT_ACL_NOT_FOUND" in command
+    assert "GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])" in command
     assert "PROJECT_VERIFIED" in command
 
 

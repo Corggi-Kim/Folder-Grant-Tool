@@ -37,7 +37,7 @@ def execute_powershell_job(session_factory: sessionmaker, settings: Settings, jo
                 result = runner.run(command)
             except Exception as exc:
                 if isinstance(exc, PowerShellExecutionError):
-                    code = exc.code
+                    code = _specific_error_code(str(exc), exc.code)
                 elif isinstance(exc, (UnsupportedStepError, KeyError)):
                     code = "INVALID_STEP"
                 else:
@@ -106,3 +106,16 @@ def _cancel_remaining_steps(job) -> None:
         if step.status == "queued":
             step.status = "cancelled"
             step.finished_at = now
+
+
+def _specific_error_code(message: str, fallback: str) -> str:
+    known_codes = (
+        "PROJECT_ROOT_NOT_FOUND",
+        "STUDY_ALL_NOT_FOUND",
+        "ROOT_ACL_NOT_FOUND",
+        "STUDY_ALL_ACL_NOT_FOUND",
+        "ROBOCOPY_FAILED",
+        "ACL_CLEANUP_FAILED",
+        "PATH_NOT_FOUND",
+    )
+    return next((code for code in known_codes if code in message), fallback)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "folder-grant-api"
-version = "0.3.0"
+version = "0.3.1"
 description = "API service for Folder Grant Tool authorization operations"
 requires-python = ">=3.11"
 dependencies = [
