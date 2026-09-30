@@ -97,7 +97,23 @@ def test_project_verification_checks_group_paths_and_acls() -> None:
     assert "STUDY_ALL_NOT_FOUND" in command
     assert "ROOT_ACL_NOT_FOUND" in command
     assert "GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])" in command
+    assert "$allowed=$allowed -bor $ace.FileSystemRights" in command
+    assert "RIGHTS=" in command
     assert "PROJECT_VERIFIED" in command
+
+
+def test_project_acl_grant_resolves_group_to_exact_sid() -> None:
+    command = build_step_command(
+        step(
+            "grant_project_root_acl",
+            r"\\server\share\98765",
+            principal="LSK 98-765",
+            permission="read_execute",
+        )
+    )
+    assert "Get-ADGroup -Identity 'LSK 98-765'" in command
+    assert "$sidPrincipal='*' + $group.SID.Value" in command
+    assert "/grant ($sidPrincipal + ':(CI)(OI)RX')" in command
 
 
 def test_encoded_command_uses_powershell_utf16_encoding() -> None:

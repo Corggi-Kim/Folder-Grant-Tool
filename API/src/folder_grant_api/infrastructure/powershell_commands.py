@@ -44,9 +44,9 @@ def build_step_command(step: JobStepRecord) -> str:
     if step.step_type == "cleanup_unknown_acl":
         return _cleanup_unknown_acl_command(step)
     if step.step_type == "grant_project_root_acl":
-        return _icacls_grant(quote(step.target), details["principal"], "(CI)(OI)RX")
+        return _project_group_acl_grant(step, "(CI)(OI)RX")
     if step.step_type == "grant_study_all_acl":
-        return _icacls_grant(quote(step.target), details["principal"], "(CI)(OI)RXM")
+        return _project_group_acl_grant(step, "(CI)(OI)RXM")
     if step.step_type == "verify_project_creation":
         return _verify_project_creation_command(step)
     raise UnsupportedStepError(f"지원하지 않는 작업 단계입니다: {step.step_type}")
@@ -57,6 +57,17 @@ def _icacls_grant(path_expression: str, principal: str, permission: str, recursi
     grant_value = quote(f"{principal}:{permission}")
     return (
         f"icacls {path_expression} /grant {grant_value}{recursive_flags};"
+        "if ($LASTEXITCODE -ne 0) { throw ('icacls grant failed: ' + $LASTEXITCODE) };"
+    )
+
+
+def _project_group_acl_grant(step: JobStepRecord, permission: str) -> str:
+    """Grant to the exact AD group SID instead of relying on name resolution."""
+    principal = (step.details or {})["principal"]
+    return (
+        f"$group=Get-ADGroup -Identity {quote(principal)} -ErrorAction Stop;"
+        "$sidPrincipal='*' + $group.SID.Value;"
+        f"icacls {quote(step.target)} /grant ($sidPrincipal + {quote(':' + permission)});"
         "if ($LASTEXITCODE -ne 0) { throw ('icacls grant failed: ' + $LASTEXITCODE) };"
     )
 
@@ -180,14 +191,21 @@ def _verify_project_creation_command(step: JobStepRecord) -> str:
         f"if (-not (Test-Path -LiteralPath {quote(step.target)} -PathType Container)) {{ throw 'PROJECT_ROOT_NOT_FOUND' }};"
         f"if (-not (Test-Path -LiteralPath {quote(study_all_path)} -PathType Container)) {{ throw 'STUDY_ALL_NOT_FOUND' }};"
         "$groupSid=$group.SID.Value;"
-        "function Test-GroupAcl($path,[System.Security.AccessControl.FileSystemRights]$right) {"
+        "function Get-GroupAllowRights($path,$sid) {"
         "$acl=Get-Acl -LiteralPath $path;"
         "$rules=$acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier]);"
+        "$allowed=[System.Security.AccessControl.FileSystemRights]0;"
         "foreach($ace in $rules) {"
-        "if ($ace.IdentityReference.Value -eq $groupSid -and $ace.AccessControlType -eq 'Allow' -and (($ace.FileSystemRights -band $right) -eq $right)) { return $true }"
-        "}; return $false"
+        "if ($ace.IdentityReference.Value -eq $sid -and $ace.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow) {"
+        "$allowed=$allowed -bor $ace.FileSystemRights;"
+        "}"
+        "}; return $allowed"
         "};"
-        f"if (-not (Test-GroupAcl {quote(step.target)} ([System.Security.AccessControl.FileSystemRights]::ReadAndExecute))) {{ throw 'ROOT_ACL_NOT_FOUND' }};"
-        f"if (-not (Test-GroupAcl {quote(study_all_path)} ([System.Security.AccessControl.FileSystemRights]::Modify))) {{ throw 'STUDY_ALL_ACL_NOT_FOUND' }};"
+        f"$rootRights=Get-GroupAllowRights {quote(step.target)} $groupSid;"
+        "$requiredRoot=[System.Security.AccessControl.FileSystemRights]::ReadAndExecute;"
+        "if (($rootRights -band $requiredRoot) -ne $requiredRoot) { throw ('ROOT_ACL_NOT_FOUND:SID=' + $groupSid + ':RIGHTS=' + [int64]$rootRights) };"
+        f"$studyAllRights=Get-GroupAllowRights {quote(study_all_path)} $groupSid;"
+        "$requiredStudyAll=[System.Security.AccessControl.FileSystemRights]::Modify;"
+        "if (($studyAllRights -band $requiredStudyAll) -ne $requiredStudyAll) { throw ('STUDY_ALL_ACL_NOT_FOUND:SID=' + $groupSid + ':RIGHTS=' + [int64]$studyAllRights) };"
         "Write-Output 'PROJECT_VERIFIED';"
     )
