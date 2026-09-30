@@ -70,6 +70,13 @@ FGT_EXECUTOR_MODE=mock
 
 `mock`은 API 요청, SQLite 저장, 작업 상태 변경만 모의 실행하고 AD 및 폴더 ACL은 변경하지 않는 안전 확인 모드입니다. `.env`를 저장한 뒤 API 서버를 재시작해야 설정이 적용됩니다.
 
+외부 PC에서 접속할 서버의 기본 수신 주소와 포트는 다음과 같습니다.
+
+```dotenv
+FGT_HOST=0.0.0.0
+FGT_PORT=8000
+```
+
 Mock 검증 후 테스트 자원에 실제 작업을 적용할 때만 서버를 중지하고 다음으로 변경합니다.
 
 ```dotenv
@@ -81,6 +88,60 @@ FGT_GROUP_OU_PATH=OU=Group Project Folder,OU=0.Management Object Group,OU=lskglo
 ```
 
 PowerShell 모드는 기본 API Key인 `change-me`로 시작할 수 없습니다. 사용자 사번·프로젝트 코드·Level2·Level3를 제한된 형식으로 검증하고 서버가 허용된 작업 단계만 PowerShell 명령으로 변환합니다. API에서 임의 PowerShell 문자열은 받지 않습니다.
+
+## Windows 서비스 등록
+
+API 서버를 로그인 세션의 콘솔 명령으로 계속 실행하지 않고 Windows 부팅 시 자동 시작되는 `FolderGrantApi` 서비스로 등록할 수 있습니다. 서비스 래퍼는 Uvicorn을 별도 프로세스로 실행하고 중지 요청 시 해당 프로세스를 종료하며, 비정상 종료 시 Windows 서비스 복구 설정으로 다시 시작합니다.
+
+먼저 실행 중인 수동 Uvicorn 프로세스를 종료합니다. 그다음 **관리자 권한 PowerShell**에서 `API` 폴더로 이동합니다.
+
+Mock 모드에서는 다음 명령으로 등록할 수 있습니다.
+
+```powershell
+cd C:\Folder-Grant-Tool\API
+.\service\install_service.ps1 -OpenFirewall
+```
+
+PowerShell 실행 모드에서는 LocalSystem 대신 AD 조회, 공유 폴더 접근 및 ACL 변경 권한이 있는 전용 도메인 서비스 계정을 지정해야 합니다.
+
+```powershell
+cd C:\Folder-Grant-Tool\API
+$credential = Get-Credential 'LSKGLOBAL\서비스계정'
+.\service\install_service.ps1 -Credential $credential -OpenFirewall
+```
+
+`-OpenFirewall`은 `.env`의 `FGT_PORT`에 대한 인바운드 TCP 규칙을 생성합니다. 방화벽을 별도로 관리한다면 이 옵션을 생략합니다. 설치 스크립트는 다음 작업을 수행합니다.
+
+1. `.[windows-service]` 의존성과 pywin32 설치
+2. 서비스 시작 유형을 `Automatic`으로 등록
+3. 비정상 종료 시 5초, 15초, 30초 간격 재시작 설정
+4. 선택적으로 Windows 방화벽 규칙 추가
+5. 서비스 시작
+
+등록 후 상태와 API 응답을 확인합니다.
+
+```powershell
+Get-Service FolderGrantApi
+Invoke-RestMethod http://127.0.0.1:8000/health
+Invoke-RestMethod http://127.0.0.1:8000/ready -Headers @{ 'X-API-Key' = '실제-API-Key' }
+```
+
+서비스 제어 및 로그 확인 명령은 다음과 같습니다.
+
+```powershell
+Restart-Service FolderGrantApi
+Stop-Service FolderGrantApi
+Start-Service FolderGrantApi
+Get-Content .\logs\service.log -Tail 100
+```
+
+`.env`를 변경하면 `Restart-Service FolderGrantApi`를 실행해야 반영됩니다. 서비스 제거 시 `.env`, SQLite DB 및 로그는 삭제되지 않습니다.
+
+```powershell
+.\service\uninstall_service.ps1
+```
+
+서비스가 시작되지 않으면 먼저 `logs\service.log`와 Windows 이벤트 뷰어의 Application 로그를 확인합니다. PowerShell 모드에서는 서비스 계정에 **서비스로 로그온**, AD 그룹 관리, `\\LSK_S010\Study Folder` 공유 및 NTFS 권한이 모두 있어야 합니다.
 
 ## 현재 실행 방식의 제한
 

@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     environment: str = "development"
     database_url: str = "sqlite:///./data/folder_grant.db"
     api_key: str = "change-me"
+    host: str = "0.0.0.0"
+    port: int = 8000
     executor_mode: Literal["mock", "powershell"] = "mock"
     powershell_path: str = "powershell.exe"
     powershell_timeout_seconds: int = 300
@@ -34,6 +36,8 @@ class Settings(BaseSettings):
             raise ValueError("PowerShell 모드에서는 기본 API Key를 사용할 수 없습니다.")
         if self.powershell_timeout_seconds < 1:
             raise ValueError("PowerShell timeout은 1초 이상이어야 합니다.")
+        if not 1 <= self.port <= 65535:
+            raise ValueError("API port는 1~65535 범위여야 합니다.")
 
 
 @lru_cache
