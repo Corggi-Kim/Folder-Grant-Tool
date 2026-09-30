@@ -3,7 +3,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from folder_grant_api.domain.operation_plan import OperationPlan
+from folder_grant_api.domain.project_plan import ProjectCreationPlan
 from folder_grant_api.schemas.access_job import AccessJobRequest
+from folder_grant_api.schemas.project_job import ProjectJobRequest
 
 from .models import AuditLogRecord, JobRecord, JobStepRecord, utc_now
 
@@ -29,24 +31,56 @@ class JobRepository:
         return self.session.scalar(statement)
 
     def create(self, request: AccessJobRequest, plan: OperationPlan) -> JobRecord:
-        job = JobRecord(
+        return self._create_job(
             request_id=request.request_id,
             source=request.source,
             operation=request.operation.value,
             project_status=request.project_status.value,
-            status="queued",
             request_payload=request.model_dump(mode="json"),
             requested_by=request.requested_by,
+            steps=[(step.type, step.target, step.description, {"permission": step.permission, **step.metadata}) for step in plan.steps],
+        )
+
+    def create_project(self, request: ProjectJobRequest, plan: ProjectCreationPlan) -> JobRecord:
+        return self._create_job(
+            request_id=request.request_id,
+            source=request.source,
+            operation="create_project",
+            project_status="new",
+            request_payload=request.model_dump(mode="json"),
+            requested_by=request.requested_by,
+            steps=[(step.type, step.target, step.description, step.metadata) for step in plan.steps],
+        )
+
+    def _create_job(
+        self,
+        *,
+        request_id: str,
+        source: str,
+        operation: str,
+        project_status: str,
+        request_payload: dict,
+        requested_by: str,
+        steps: list[tuple[str, str, str, dict]],
+    ) -> JobRecord:
+        job = JobRecord(
+            request_id=request_id,
+            source=source,
+            operation=operation,
+            project_status=project_status,
+            status="queued",
+            request_payload=request_payload,
+            requested_by=requested_by,
             steps=[
                 JobStepRecord(
                     step_order=index,
-                    step_type=step.type,
+                    step_type=step_type,
                     status="queued",
-                    target=step.target,
-                    description=step.description,
-                    details={"permission": step.permission, **step.metadata},
+                    target=target,
+                    description=description,
+                    details=details,
                 )
-                for index, step in enumerate(plan.steps, start=1)
+                for index, (step_type, target, description, details) in enumerate(steps, start=1)
             ],
         )
         try:
@@ -55,14 +89,14 @@ class JobRepository:
             self.session.add(AuditLogRecord(
                 job_id=job.id,
                 event_type="job.created",
-                actor=request.requested_by,
-                message="권한 작업이 접수되었습니다.",
-                details={"request_id": request.request_id, "executor_mode": "mock"},
+                actor=requested_by,
+                message="작업이 접수되었습니다.",
+                details={"request_id": request_id},
             ))
             self.session.commit()
         except IntegrityError as exc:
             self.session.rollback()
-            raise DuplicateRequestError(request.request_id) from exc
+            raise DuplicateRequestError(request_id) from exc
         return self.get(job.id)  # type: ignore[return-value]
 
     def request_cancel(self, job: JobRecord, actor: str) -> JobRecord:

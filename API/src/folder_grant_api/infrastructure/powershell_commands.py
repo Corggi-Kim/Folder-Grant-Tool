@@ -37,6 +37,18 @@ def build_step_command(step: JobStepRecord) -> str:
             f"icacls {quote(step.target)} /remove {quote(details['principal'])} /T /C;"
             "if ($LASTEXITCODE -ne 0) { throw ('icacls remove failed: ' + $LASTEXITCODE) }"
         )
+    if step.step_type == "ensure_ad_group":
+        return _ensure_ad_group_command(step)
+    if step.step_type == "ensure_project_folder":
+        return _ensure_project_folder_command(step)
+    if step.step_type == "cleanup_unknown_acl":
+        return _cleanup_unknown_acl_command(step)
+    if step.step_type == "grant_project_root_acl":
+        return _icacls_grant(quote(step.target), details["principal"], "(CI)(OI)RX")
+    if step.step_type == "grant_study_all_acl":
+        return _icacls_grant(quote(step.target), details["principal"], "(CI)(OI)RXM")
+    if step.step_type == "verify_project_creation":
+        return _verify_project_creation_command(step)
     raise UnsupportedStepError(f"지원하지 않는 작업 단계입니다: {step.step_type}")
 
 
@@ -101,4 +113,80 @@ def _closed_path_command(step: JobStepRecord, *, grant: bool) -> str:
         prefix
         + f"icacls $target /remove {quote(details['principal'])} /T /C;"
         + "if ($LASTEXITCODE -ne 0) { throw ('icacls remove failed: ' + $LASTEXITCODE) }"
+    )
+
+
+def _ensure_ad_group_command(step: JobStepRecord) -> str:
+    details = step.details or {}
+    return (
+        f"$group=Get-ADGroup -Identity {quote(step.target)} -ErrorAction SilentlyContinue;"
+        "if (-not $group) {"
+        f"New-ADGroup -Name {quote(step.target)} -SamAccountName {quote(step.target)} "
+        "-GroupCategory Security -GroupScope DomainLocal "
+        f"-Path {quote(details['group_ou_path'])} -Description {quote(details.get('project_name', ''))} "
+        "-ErrorAction Stop;"
+        "Start-Sleep -Seconds 15;"
+        "Write-Output 'GROUP_CREATED';"
+        "} else { Write-Output 'GROUP_EXISTS'; }"
+    )
+
+
+def _ensure_project_folder_command(step: JobStepRecord) -> str:
+    template_path = (step.details or {})["template_path"]
+    return (
+        f"if (Test-Path -LiteralPath {quote(step.target)} -PathType Container) {{"
+        "Write-Output 'FOLDER_EXISTS';"
+        "} else {"
+        f"$output=& robocopy {quote(template_path)} {quote(step.target)} '*.*' /E /COPYALL;"
+        "$robocopyCode=$LASTEXITCODE;"
+        "$output | Select-Object -Last 20;"
+        "if ($robocopyCode -ge 8) { throw ('ROBOCOPY_FAILED:' + $robocopyCode) };"
+        "Write-Output ('FOLDER_CREATED:ROBOCOPY_CODE=' + $robocopyCode);"
+        "}"
+    )
+
+
+def _cleanup_unknown_acl_command(step: JobStepRecord) -> str:
+    paths = (step.details or {}).get("paths") or [step.target]
+    paths_array = "@(" + ",".join(quote(str(path)) for path in paths) + ")"
+    return (
+        f"$paths={paths_array};"
+        "foreach($path in $paths) {"
+        "if (-not (Test-Path -LiteralPath $path -PathType Container)) { throw ('PATH_NOT_FOUND:' + $path) };"
+        "$unknown=@();"
+        "foreach($ace in (Get-Acl -LiteralPath $path).Access) {"
+        "$identity=$ace.IdentityReference.Value;"
+        "if ($identity -match '^S-1-') {"
+        "try { $sidObject=New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $identity; $null=$sidObject.Translate([System.Security.Principal.NTAccount]) }"
+        "catch { $unknown += $identity }"
+        "}"
+        "};"
+        "$unknown=$unknown | Sort-Object -Unique;"
+        "foreach($identity in $unknown) {"
+        "icacls $path /remove $identity /T /C | Out-Null;"
+        "if ($LASTEXITCODE -ne 0) { throw ('ACL_CLEANUP_FAILED:' + $path + ':' + $LASTEXITCODE) }"
+        "};"
+        "};"
+        "Write-Output ('UNKNOWN_ACL_REMOVED=' + @($unknown).Count);"
+    )
+
+
+def _verify_project_creation_command(step: JobStepRecord) -> str:
+    details = step.details or {}
+    group_name = details["group_name"]
+    study_all_path = details["study_all_path"]
+    return (
+        f"$group=Get-ADGroup -Identity {quote(group_name)} -ErrorAction Stop;"
+        f"if (-not (Test-Path -LiteralPath {quote(step.target)} -PathType Container)) {{ throw 'PROJECT_ROOT_NOT_FOUND' }};"
+        f"if (-not (Test-Path -LiteralPath {quote(study_all_path)} -PathType Container)) {{ throw 'STUDY_ALL_NOT_FOUND' }};"
+        "$groupSid=$group.SID.Value;"
+        "function Test-GroupAcl($path,[System.Security.AccessControl.FileSystemRights]$right) {"
+        "foreach($ace in (Get-Acl -LiteralPath $path).Access) {"
+        "try { $sid=$ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { continue };"
+        "if ($sid -eq $groupSid -and $ace.AccessControlType -eq 'Allow' -and (($ace.FileSystemRights -band $right) -eq $right)) { return $true }"
+        "}; return $false"
+        "};"
+        f"if (-not (Test-GroupAcl {quote(step.target)} ([System.Security.AccessControl.FileSystemRights]::ReadAndExecute))) {{ throw 'ROOT_ACL_NOT_FOUND' }};"
+        f"if (-not (Test-GroupAcl {quote(study_all_path)} ([System.Security.AccessControl.FileSystemRights]::Modify))) {{ throw 'STUDY_ALL_ACL_NOT_FOUND' }};"
+        "Write-Output 'PROJECT_VERIFIED';"
     )

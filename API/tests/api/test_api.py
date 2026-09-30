@@ -37,6 +37,16 @@ def valid_payload() -> dict:
     }
 
 
+def valid_project_payload() -> dict:
+    return {
+        "request_id": "PROJECT-TEST-001",
+        "source": "swagger",
+        "project_code": "98765",
+        "project_name": "API Test Project",
+        "requested_by": "tester",
+    }
+
+
 def test_health_and_ready(tmp_path: Path) -> None:
     with build_client(tmp_path) as client:
         assert client.get("/health").json()["status"] == "ok"
@@ -166,3 +176,50 @@ def test_powershell_mode_rejects_default_api_key() -> None:
     settings = Settings(executor_mode="powershell", api_key="change-me")
     with pytest.raises(ValueError, match="기본 API Key"):
         settings.validate_runtime_safety()
+
+
+def test_project_preview_returns_expected_creation_plan(tmp_path: Path) -> None:
+    with build_client(tmp_path) as client:
+        response = client.post("/api/v1/project-jobs/preview", json=valid_project_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["group_name"] == "LSK 98-765"
+    assert body["root_path"].endswith(r"Study Folder\98765")
+    assert body["steps"][-1]["type"] == "verify_project_creation"
+
+
+def test_project_job_runs_all_steps_in_mock_mode(tmp_path: Path) -> None:
+    with build_client(tmp_path) as client:
+        created = client.post("/api/v1/project-jobs", json=valid_project_payload())
+        fetched = client.get(f"/api/v1/project-jobs/{created.json()['job_id']}")
+
+    assert created.status_code == 202
+    assert fetched.json()["status"] == "simulated"
+    assert len(fetched.json()["steps"]) == 6
+    assert all(step["status"] == "simulated" for step in fetched.json()["steps"])
+
+
+def test_project_job_powershell_mode_records_success_without_real_process(tmp_path: Path) -> None:
+    with patch(
+        "folder_grant_api.workers.powershell_worker.PowerShellRunner.run",
+        return_value=PowerShellResult(0, "OK", ""),
+    ) as run:
+        with build_client(tmp_path, executor_mode="powershell") as client:
+            created = client.post("/api/v1/project-jobs", json=valid_project_payload())
+            fetched = client.get(f"/api/v1/project-jobs/{created.json()['job_id']}")
+
+    assert fetched.json()["status"] == "succeeded"
+    assert fetched.json()["executor_mode"] == "powershell"
+    assert run.call_count == 6
+
+
+def test_project_request_id_conflicts_with_different_project(tmp_path: Path) -> None:
+    changed = valid_project_payload()
+    changed["project_code"] = "98766"
+    with build_client(tmp_path) as client:
+        client.post("/api/v1/project-jobs", json=valid_project_payload())
+        response = client.post("/api/v1/project-jobs", json=changed)
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "REQUEST_ID_CONFLICT"

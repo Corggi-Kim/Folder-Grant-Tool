@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     executor_mode: Literal["mock", "powershell"] = "mock"
     powershell_path: str = "powershell.exe"
     powershell_timeout_seconds: int = 300
+    template_root: str = r"\\LSK_S010\Study folder\_Template"
+    group_ou_path: str = r"OU=Group Project Folder,OU=0.Management Object Group,OU=lskglobal,DC=lskglobal,DC=com"
     share_root: str = r"\\LSK_S010\Study Folder\{proj_seg}\{lv2}\{lv3}"
     closed_root: str = r"\\192.168.1.95\Study_Closed"
     closed_archive_root: str = r"\\192.168.1.95\Study_Archive"

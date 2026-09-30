@@ -60,6 +60,45 @@ def test_closed_acl_command_checks_all_candidate_paths() -> None:
     assert r"\\server\archive\26012" in command
 
 
+def test_project_group_command_is_idempotent() -> None:
+    command = build_step_command(
+        step(
+            "ensure_ad_group",
+            "LSK 98-765",
+            project_name="API Test Project",
+            group_ou_path="OU=Groups,DC=example,DC=com",
+        )
+    )
+    assert "Get-ADGroup" in command
+    assert "if (-not $group)" in command
+    assert "New-ADGroup" in command
+    assert "GROUP_EXISTS" in command
+
+
+def test_project_folder_command_accepts_robocopy_success_codes_below_eight() -> None:
+    command = build_step_command(
+        step("ensure_project_folder", r"\\server\share\98765", template_path=r"\\server\template")
+    )
+    assert "robocopy" in command
+    assert "$robocopyCode -ge 8" in command
+    assert "FOLDER_EXISTS" in command
+
+
+def test_project_verification_checks_group_paths_and_acls() -> None:
+    command = build_step_command(
+        step(
+            "verify_project_creation",
+            r"\\server\share\98765",
+            group_name="LSK 98-765",
+            study_all_path=r"\\server\share\98765\Study\All",
+        )
+    )
+    assert "PROJECT_ROOT_NOT_FOUND" in command
+    assert "STUDY_ALL_NOT_FOUND" in command
+    assert "ROOT_ACL_NOT_FOUND" in command
+    assert "PROJECT_VERIFIED" in command
+
+
 def test_encoded_command_uses_powershell_utf16_encoding() -> None:
     assert encode_command("Write-Output '테스트'")
 
