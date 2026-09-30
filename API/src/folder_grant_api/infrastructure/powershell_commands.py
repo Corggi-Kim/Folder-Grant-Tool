@@ -65,8 +65,10 @@ def _project_group_acl_grant(step: JobStepRecord, permission: str) -> str:
     """Grant to the exact AD group SID instead of relying on name resolution."""
     principal = (step.details or {})["principal"]
     return (
-        f"$group=Get-ADGroup -Identity {quote(principal)} -ErrorAction Stop;"
-        "$sidPrincipal='*' + $group.SID.Value;"
+        f"$group=Get-ADGroup -Identity {quote(principal)} -Properties SID -ErrorAction Stop;"
+        "$groupSid=[string]$group.SID;"
+        "if ([string]::IsNullOrWhiteSpace($groupSid)) { throw 'GROUP_SID_NOT_FOUND' };"
+        "$sidPrincipal='*' + $groupSid;"
         f"icacls {quote(step.target)} /grant ($sidPrincipal + {quote(':' + permission)});"
         "if ($LASTEXITCODE -ne 0) { throw ('icacls grant failed: ' + $LASTEXITCODE) };"
     )
@@ -187,10 +189,11 @@ def _verify_project_creation_command(step: JobStepRecord) -> str:
     group_name = details["group_name"]
     study_all_path = details["study_all_path"]
     return (
-        f"$group=Get-ADGroup -Identity {quote(group_name)} -ErrorAction Stop;"
+        f"$group=Get-ADGroup -Identity {quote(group_name)} -Properties SID -ErrorAction Stop;"
         f"if (-not (Test-Path -LiteralPath {quote(step.target)} -PathType Container)) {{ throw 'PROJECT_ROOT_NOT_FOUND' }};"
         f"if (-not (Test-Path -LiteralPath {quote(study_all_path)} -PathType Container)) {{ throw 'STUDY_ALL_NOT_FOUND' }};"
-        "$groupSid=$group.SID.Value;"
+        "$groupSid=[string]$group.SID;"
+        "if ([string]::IsNullOrWhiteSpace($groupSid)) { throw 'GROUP_SID_NOT_FOUND' };"
         "function Get-GroupAllowRights($path,$sid) {"
         "$acl=Get-Acl -LiteralPath $path;"
         "$rules=$acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier]);"

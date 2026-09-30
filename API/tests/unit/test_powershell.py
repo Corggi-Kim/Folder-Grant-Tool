@@ -96,6 +96,8 @@ def test_project_verification_checks_group_paths_and_acls() -> None:
     assert "PROJECT_ROOT_NOT_FOUND" in command
     assert "STUDY_ALL_NOT_FOUND" in command
     assert "ROOT_ACL_NOT_FOUND" in command
+    assert "$groupSid=[string]$group.SID" in command
+    assert "GROUP_SID_NOT_FOUND" in command
     assert "GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])" in command
     assert "$allowed=$allowed -bor $ace.FileSystemRights" in command
     assert "RIGHTS=" in command
@@ -111,8 +113,9 @@ def test_project_acl_grant_resolves_group_to_exact_sid() -> None:
             permission="read_execute",
         )
     )
-    assert "Get-ADGroup -Identity 'LSK 98-765'" in command
-    assert "$sidPrincipal='*' + $group.SID.Value" in command
+    assert "Get-ADGroup -Identity 'LSK 98-765' -Properties SID" in command
+    assert "$groupSid=[string]$group.SID" in command
+    assert "$sidPrincipal='*' + $groupSid" in command
     assert "/grant ($sidPrincipal + ':(CI)(OI)RX')" in command
 
 

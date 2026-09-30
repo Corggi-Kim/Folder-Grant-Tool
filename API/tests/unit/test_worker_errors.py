@@ -8,3 +8,7 @@ def test_specific_project_verification_error_is_preserved_from_clixml() -> None:
 
 def test_unknown_powershell_error_uses_fallback() -> None:
     assert _specific_error_code("unexpected", "POWERSHELL_FAILED") == "POWERSHELL_FAILED"
+
+
+def test_missing_group_sid_has_specific_error_code() -> None:
+    assert _specific_error_code("GROUP_SID_NOT_FOUND", "POWERSHELL_FAILED") == "GROUP_SID_NOT_FOUND"

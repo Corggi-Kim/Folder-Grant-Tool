@@ -114,6 +114,7 @@ def _specific_error_code(message: str, fallback: str) -> str:
         "STUDY_ALL_NOT_FOUND",
         "ROOT_ACL_NOT_FOUND",
         "STUDY_ALL_ACL_NOT_FOUND",
+        "GROUP_SID_NOT_FOUND",
         "ROBOCOPY_FAILED",
         "ACL_CLEANUP_FAILED",
         "PATH_NOT_FOUND",
