@@ -720,6 +720,81 @@ class FolderGrantApiClient:
         return self.request('GET', '/ready')
 
 
+class ApiJobWorker(QObject):
+    progress = pyqtSignal(dict)
+    succeeded = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def __init__(self, client: FolderGrantApiClient, kind: str, payload: dict, dry_run: bool = False):
+        super().__init__()
+        if kind not in {'access', 'project'}:
+            raise ValueError('알 수 없는 API 작업 종류입니다.')
+        self.client, self.kind, self.payload, self.dry_run = client, kind, dict(payload), dry_run
+        self.poll_interval = 1.5
+        self.max_wait_seconds = 4 * 60 * 60
+        self._stop_event = threading.Event()
+        self.job_id = None
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def execute(self) -> dict:
+        """Also used by the project batch worker in its own Qt thread."""
+        path = '/api/v1/' + self.kind + '-jobs'
+        if self._stop_event.is_set():
+            return {'status': 'cancelled', 'client_stopped': True}
+        if self.dry_run:
+            preview = self.client.request('POST', path + '/preview', self.payload)
+            return {**preview, 'status': 'preview', 'client_stopped': self._stop_event.is_set()}
+        try:
+            job = self.client.request('POST', path, self.payload)
+        except ApiClientError as exc:
+            if exc.status_code is not None and exc.status_code < 500:
+                raise
+            # An accepted POST can lose its response. Never generate a new ID here.
+            try:
+                job = self.client.request('GET', path + '/by-request/' + quote(self.payload['request_id'], safe=''))
+            except ApiClientError as recovery:
+                raise ApiClientError(f'등록 결과를 확인하지 못했습니다. 같은 요청으로 재시도하세요. request_id={self.payload["request_id"]}: {recovery}') from exc
+        self.job_id = job.get('job_id')
+        if not self.job_id:
+            raise ApiClientError('API 응답에 job_id가 없습니다.')
+        job_path = path + '/' + quote(str(self.job_id), safe='')
+        deadline = time.monotonic() + self.max_wait_seconds
+        cancel_sent = False
+        while True:
+            self.progress.emit(dict(job))
+            status = job.get('status')
+            if status in FINAL_JOB_STATUSES:
+                return {**job, 'client_stopped': self._stop_event.is_set()}
+            if status not in {'queued', 'running'}:
+                raise ApiClientError('알 수 없는 API Job 상태: ' + str(status))
+            if time.monotonic() >= deadline:
+                raise ApiClientError(f'작업 조회 대기 시간이 초과되었습니다. job_id={self.job_id}')
+            if self._stop_event.is_set() and not cancel_sent:
+                self.client.request('POST', job_path + '/cancel', {'requested_by': self.payload['requested_by']})
+                cancel_sent = True
+            # Once cancelled, wait normally to avoid busy looping on a set Event.
+            if cancel_sent:
+                threading.Event().wait(self.poll_interval)
+            else:
+                self._stop_event.wait(self.poll_interval)
+            job = self.client.request('GET', job_path)
+
+    @pyqtSlot()
+    def run(self) -> None:
+        try:
+            self.succeeded.emit(self.execute())
+        except Exception as exc:
+            message = str(exc)
+            if self.client.api_key:
+                message = message.replace(self.client.api_key, '[API Key]')
+            self.failed.emit(message)
+        finally:
+            self.finished.emit()
+
+
 class SettingsDialog(QDialog):
     def __init__(self, parent=None, saved=None, remembered=False, debug_on=False, fail_tol_default=5):
         try:
