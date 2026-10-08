@@ -157,6 +157,43 @@ class UiFlowTests(unittest.TestCase):
         self.assertEqual(item.data(self.m.Qt.UserRole)['result']['status'],'simulated')
         viewer.close()
 
+    def test_new_project_viewer_is_singleton(self):
+        w = self.window
+        w.ensure_bus_session_async = lambda purpose,callback:callback(True)
+        w._load_new_items = Mock()
+        w.open_new_viewer()
+        first = w._newdlg
+        w.open_new_viewer()
+        self.assertIs(w._newdlg,first)
+        self.assertEqual(sum(isinstance(x,self.m.NewItemsViewer) for x in w.children()),1)
+        first.close()
+
+    def test_stop_in_project_startup_does_not_register(self):
+        w = self.window
+        viewer = self.m.NewItemsViewer(w)
+        w._newdlg = viewer
+        viewer._manual_add('26-012','Test')
+        original_busy = viewer._set_busy
+        def busy(on,message=''):
+            original_busy(on,message)
+            if on:
+                w._stop_all()
+        viewer._set_busy = busy
+        with patch.object(self.m.ApiJobWorker,'execute') as api:
+            viewer._on_create_clicked()
+            deadline = time.monotonic()+3
+            while viewer.worker_thread is not None and time.monotonic()<deadline:
+                self.app.processEvents(); time.sleep(0.01)
+        api.assert_not_called()
+        viewer.close()
+
+    def test_manual_project_accepts_alternate_bus_name_header(self):
+        viewer = self.m.NewItemsViewer(self.window)
+        viewer.set_data(['프로젝트코드','과제명'],[])
+        viewer._manual_add('26-012','Test')
+        self.assertEqual(viewer.tbl.item(0,viewer._hidx['과제명']).text(),'Test')
+        viewer.close()
+
     def test_close_waits_for_api_thread_without_blocking(self):
         w = self.window
         worker = Mock(); thread = Mock(); thread.isRunning.return_value = True
@@ -204,3 +241,15 @@ class UiFlowTests(unittest.TestCase):
         w._start_next_job.assert_not_called()
         w.run_queue = []
         w._waiting_for_bus = False
+
+    def test_manual_completion_holds_controls_during_bus_preparation(self):
+        w = self.window
+        self.row(result=dict(status='succeeded',executor_mode='powershell'))
+        def prepare(purpose):
+            w._on_session_busy(False)
+            self.assertTrue(w._waiting_for_bus)
+            self.assertFalse(w.btn_run_execute.isEnabled())
+            return True
+        w._ensure_bus_session = prepare
+        w.run_complete()
+        self.assertEqual(len(self.completed),1)

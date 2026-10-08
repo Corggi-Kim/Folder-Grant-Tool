@@ -36,8 +36,11 @@ class WorkerTests(unittest.TestCase):
                 elif self.path.endswith('/preview'):
                     data = {'valid': True, 'steps': []}
                 elif self.path.endswith('/cancel'):
-                    owner.scenario = 'cancelled'
-                    data['status'] = 'running'
+                    if owner.scenario == 'cancel-race':
+                        code,data = 409, {'detail':'Already completed'}
+                    else:
+                        owner.scenario = 'cancelled'
+                        data['status'] = 'running'
                 elif self.command == 'POST' and owner.scenario == 'lost':
                     code, data = 503, {'detail': 'lost response'}
                 elif '/by-request/' in self.path:
@@ -49,6 +52,10 @@ class WorkerTests(unittest.TestCase):
                     elif owner.scenario == 'invalid':
                         data = []
                     elif owner.scenario == 'cancelled':
+                        data['status'] = 'cancelled'
+                    elif owner.scenario == 'cancel-requested' and owner.polls == 1:
+                        data['status'] = 'cancel_requested'
+                    elif owner.scenario == 'cancel-requested':
                         data['status'] = 'cancelled'
                     elif owner.scenario == 'slow' and owner.polls == 1:
                         threading.Event().wait(0.15)
@@ -123,3 +130,43 @@ class WorkerTests(unittest.TestCase):
         worker.run()
         self.assertFalse(self.calls)
         self.assertEqual(self.results[0]['status'], 'cancelled')
+
+    def test_cancel_requested_is_polled_until_final_state(self):
+        self.scenario = 'cancel-requested'
+        self.worker().run()
+        self.assertFalse(self.errors)
+        self.assertEqual(self.results[0]['status'],'cancelled')
+
+    def test_cancel_conflict_still_reads_terminal_state(self):
+        self.scenario = 'cancel-race'
+        worker = self.worker()
+        worker.progress.connect(lambda job:worker.stop())
+        worker.run()
+        self.assertFalse(self.errors)
+        self.assertEqual(self.results[0]['status'],'succeeded')
+        self.assertTrue(self.results[0]['client_stopped'])
+
+    def test_bus_actor_conflict_recovers_only_matching_execution_plan(self):
+        payload = dict(request_id='BUS-stable',source='bus',requested_by='new-operator',
+                       operation='grant',project_status='progress')
+        step = dict(type='add_group_member',target='GROUP',metadata={'employee_id':'E1'},permission=None)
+        for matches in (True,False):
+            with self.subTest(matches=matches):
+                api = self.m.FolderGrantApiClient('http://localhost:8000','key')
+                existing = dict(job_id='J1',request_id='BUS-stable',requested_by='old-operator',
+                                operation='grant',project_status='progress',status='succeeded',
+                                executor_mode='powershell',steps=[dict(type=step['type'],target='GROUP' if matches else 'OTHER',
+                                                                     details={'permission':None,'employee_id':'E1'})])
+                from unittest.mock import Mock
+                api.request = Mock(side_effect=[self.m.ApiClientError('conflict',409),existing,{'steps':[step]}])
+                worker = self.m.ApiJobWorker(api,'access',payload)
+                results,errors = [],[]
+                worker.succeeded.connect(results.append); worker.failed.connect(errors.append)
+                worker.run()
+                if matches:
+                    self.assertFalse(errors)
+                    self.assertEqual(results[0]['job_id'],'J1')
+                    self.assertEqual(results[0]['requested_by'],'old-operator')
+                else:
+                    self.assertFalse(results)
+                    self.assertTrue(errors)

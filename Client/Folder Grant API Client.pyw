@@ -539,6 +539,26 @@ class ApiJobWorker(QObject):
     def stop(self) -> None:
         self._stop_event.set()
 
+    def _verify_recovered_job(self, job: dict, preview: dict) -> None:
+        """Only recover a BUS actor conflict when the server execution plan matches."""
+        if job.get('request_id') != self.payload['request_id']:
+            raise ApiClientError('기존 Job의 요청번호가 일치하지 않습니다.',409)
+        if self.kind == 'access':
+            if any(job.get(k) != self.payload.get(k) for k in ('operation','project_status')):
+                raise ApiClientError('기존 Job의 권한 작업이 일치하지 않습니다.',409)
+        elif any(job.get(k) != self.payload.get(k) for k in ('project_code','project_name')):
+            raise ApiClientError('기존 Job의 프로젝트 입력이 일치하지 않습니다.',409)
+        expected = []
+        for step in preview.get('steps',[]):
+            details = dict(step.get('metadata',{}))
+            if self.kind == 'access':
+                details['permission'] = step.get('permission')
+            expected.append((step.get('type'),step.get('target'),details))
+        actual = [(step.get('type'),step.get('target'),step.get('details',{}))
+                  for step in job.get('steps',[])]
+        if not expected or expected != actual:
+            raise ApiClientError('기존 Job과 현재 Preview의 실행 계획이 다릅니다. 요청번호 충돌을 확인하세요.',409)
+
     def execute(self) -> dict:
         """Also used by the project batch worker in its own Qt thread."""
         path = '/api/v1/' + self.kind + '-jobs'
@@ -550,11 +570,16 @@ class ApiJobWorker(QObject):
         try:
             job = self.client.request('POST', path, self.payload)
         except ApiClientError as exc:
-            if exc.status_code is not None and exc.status_code < 500:
+            bus_conflict = exc.status_code == 409 and self.payload.get('source') == 'bus'
+            if exc.status_code is not None and exc.status_code < 500 and not bus_conflict:
                 raise
             # An accepted POST can lose its response. Never generate a new ID here.
             try:
                 job = self.client.request('GET', path + '/by-request/' + quote(self.payload['request_id'], safe=''))
+                if bus_conflict:
+                    preview = self.client.request('POST',path+'/preview',self.payload)
+                    self._verify_recovered_job(job,preview)
+                    job = {**job,'replayed':True,'recovered_after_actor_conflict':True}
             except ApiClientError as recovery:
                 raise ApiClientError(f'등록 결과를 확인하지 못했습니다. 같은 요청으로 재시도하세요. request_id={self.payload["request_id"]}: {recovery}') from exc
         self.job_id = job.get('job_id')
@@ -568,12 +593,20 @@ class ApiJobWorker(QObject):
             status = job.get('status')
             if status in FINAL_JOB_STATUSES:
                 return {**job, 'client_stopped': self._stop_event.is_set()}
-            if status not in {'queued', 'running'}:
+            if status not in {'queued', 'running', 'cancel_requested'}:
                 raise ApiClientError('알 수 없는 API Job 상태: ' + str(status))
             if time.monotonic() >= deadline:
                 raise ApiClientError(f'작업 조회 대기 시간이 초과되었습니다. job_id={self.job_id}')
             if self._stop_event.is_set() and not cancel_sent:
-                self.client.request('POST', job_path + '/cancel', {'requested_by': self.payload['requested_by']})
+                try:
+                    self.client.request('POST', job_path + '/cancel', {'requested_by': self.payload['requested_by']})
+                except ApiClientError as exc:
+                    if exc.status_code != 409:
+                        raise
+                    job = self.client.request('GET',job_path)
+                    if job.get('status') not in FINAL_JOB_STATUSES:
+                        raise
+                    continue
                 cancel_sent = True
             # Once cancelled, wait normally to avoid busy looping on a set Event.
             if cancel_sent:
@@ -731,7 +764,7 @@ class SettingsDialog(QDialog):
 
         self.chk_save = QCheckBox("저장")
         self.chk_save.setChecked(bool(remembered))
-        
+
         self.chk_debug = QCheckBox("디버그 모드")
         self.chk_debug.setChecked(bool(debug_on))
 
@@ -803,7 +836,7 @@ class BusSessionManager(QObject):
     countsReady = pyqtSignal(dict)
 
     MAX_INIT_RETRY = 3
-    INIT_RETRY_BASE_DELAY = 2.0     
+    INIT_RETRY_BASE_DELAY = 2.0
 
     def __init__(self, dl_dir: str):
         super().__init__()
@@ -1189,7 +1222,7 @@ class BusSessionManager(QObject):
                 self.countsReady.emit(counts)
             except Exception:
                 pass
-            
+
     @pyqtSlot()
     def start(self):
         def _cleanup_driver(drv):
@@ -1243,7 +1276,7 @@ class BusSessionManager(QObject):
 
                 WebDriverWait(d, 10).until(EC.element_to_be_clickable((By.ID, "approverYn")))
                 Select(d.find_element(By.ID, "approverYn")).select_by_value("1")
-                
+
                 self._set_request_filter(REQ_GRANT)
 
                 self._ready = True
@@ -1578,7 +1611,7 @@ class BusSessionManager(QObject):
             )
         except Exception:
             pass
-            
+
     def _debug_dump(self, tag: str):
         if not self.debug_enabled:
             return
@@ -1596,7 +1629,7 @@ class BusSessionManager(QObject):
                 pass
         except Exception:
             pass
-        
+
     def _set_request_filter(self, reqtype: str):
         self._goto_progress_site()
         d = self.driver
@@ -1730,7 +1763,7 @@ class BusSessionManager(QObject):
             return True
 
         while tried < 200:
-            self._check_cancel("process")            
+            self._check_cancel("process")
             self._go_iframe()
             next_btn = None
             try:
@@ -1806,7 +1839,7 @@ class BusSessionManager(QObject):
                 self._wait_overlay_gone(10)
                 self._go_iframe()
                 return
-            
+
             page1 = d.find_elements(By.XPATH, "//a[normalize-space()='1'] | //button[normalize-space()='1']")
             if page1:
                 try:
@@ -1948,10 +1981,10 @@ class BusSessionManager(QObject):
 
                         xpath = f"//tbody/tr[{user_eq} and {code_pred}]"
                         cand_rows = d.find_elements(By.XPATH, xpath)
-                        
+
                         if (t.get('kind') or '').strip() != '종료':
                             cand_rows = self._narrow_by_path_strict(cand_rows, lv2, lv3, path_hint)
-                       
+
                         if not cand_rows:
                             self._debug_dump("no_rows_after_filter")
                             return False
@@ -2051,9 +2084,9 @@ class BusSessionManager(QObject):
                                 d.execute_script("arguments[0].click();", okbtn)
                         except TimeoutException:
                             pass
-                        
+
                         self._wait_overlay_gone(10)
-                        self._stabilize_grid()                        
+                        self._stabilize_grid()
                         return True
 
                     self._goto_first_page()
@@ -2270,7 +2303,7 @@ class ManualEntryDialog(QDialog):
         self.cb_lv2  = QComboBox()
         self.cb_lv3  = QComboBox()
         self.cb_role = QComboBox()
-        
+
         self.cb_reqtype.addItems([REQ_GRANT, REQ_RELEASE])
         self.cb_reqtype.setCurrentText(REQ_GRANT)
 
@@ -2288,8 +2321,8 @@ class ManualEntryDialog(QDialog):
         self.le_proj.textChanged.connect(self._refresh_role_candidates)
 
         form = QFormLayout()
-        form.addRow("구분*", self.cb_kind) 
-        form.addRow("요청사항*", self.cb_reqtype) 
+        form.addRow("구분*", self.cb_kind)
+        form.addRow("요청사항*", self.cb_reqtype)
         form.addRow("사번*", self.le_user)
         form.addRow("프로젝트코드*", self.le_proj)
         form.addRow("Level2*", self.cb_lv2)
@@ -2565,12 +2598,10 @@ class NewItemsViewer(QDialog):
         self.chk_dry.setEnabled(not on)
         self.chk_auto_complete.setEnabled(not on)
         self.btn_stop.setEnabled(on)
-        QApplication.processEvents()
 
     def _on_worker_progress(self, cur: int, total: int, message: str):
         self.status_lbl.setText(message)
         self._last_worker_msg = message
-        QApplication.processEvents()
 
     def _on_worker_finished(self,ok_cnt,fail_cnt):
         self.status_lbl.setText(f'실제 성공 {ok_cnt} / 실패 {fail_cnt} — '+self._last_worker_msg)
@@ -2586,7 +2617,13 @@ class NewItemsViewer(QDialog):
         layout.addWidget(checkbox); layout.setContentsMargins(0,0,0,0)
         self.tbl.setCellWidget(row,0,holder)
         self.tbl.setItem(row,self._hidx['프로젝트코드'],QTableWidgetItem(proj))
-        self.tbl.setItem(row,self._hidx['프로젝트명'],QTableWidgetItem(name))
+        name_col = self._hidx.get('프로젝트명',self._hidx.get('과제명',self._hidx.get('제목')))
+        if name_col is None:
+            name_col = self.tbl.columnCount()
+            self.tbl.setColumnCount(name_col+1)
+            self.tbl.setHorizontalHeaderItem(name_col,QTableWidgetItem('프로젝트명'))
+            self._hidx['프로젝트명'] = name_col
+        self.tbl.setItem(row,name_col,QTableWidgetItem(name))
         self.tbl.item(row,self._hidx['프로젝트코드']).setData(Qt.UserRole,
             dict(source='test-client',request_id=new_client_request_id(),bus_done=False))
         self.status_lbl.setText('수동 요청을 추가했습니다. Dry Run 또는 API 생성을 실행하세요.')
@@ -2719,7 +2756,7 @@ class NewItemsViewer(QDialog):
 
     def _on_create_clicked(self):
         parent = self.parent()
-        if self.worker_thread is not None or parent.api_thread is not None or parent.session.is_busy():
+        if parent._closing or self.worker_thread is not None or parent.api_thread is not None or parent.session.is_busy():
             return
         if not parent.api_config.get('api_key'):
             parent._open_api_settings()
@@ -2751,7 +2788,6 @@ class NewItemsViewer(QDialog):
             return
         parent.stop_requested = False
         parent._set_running_ui(True)
-        self._set_busy(True,'API 프로젝트 작업 시작')
         self.worker_thread = QThread(self)
         self.worker = CreateWorker(items,dict(parent.creds),parent._api_client(),
                                    dry_run=self.chk_dry.isChecked(),
@@ -2766,6 +2802,9 @@ class NewItemsViewer(QDialog):
         self.worker.finished.connect(self.worker_thread.quit,type=Qt.DirectConnection)
         self.worker_thread.finished.connect(self._project_thread_finished)
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
+        self._set_busy(True,'API 프로젝트 작업 시작')
+        if parent.stop_requested or parent._closing:
+            self.worker.stop()
         self.worker_thread.start()
 
 
@@ -3508,7 +3547,7 @@ class AccessManager(QMainWindow):
 
         if hasattr(self, "table") and self.table and hasattr(self.table.horizontalHeader(), "_reposition"):
             self.table.horizontalHeader()._reposition()
-        
+
     def _toggle_theme(self):
         next_mode = "dark" if getattr(self, "current_theme", "light") == "light" else "light"
         self.apply_theme(next_mode)
@@ -3607,7 +3646,7 @@ class AccessManager(QMainWindow):
 
         self.debug_enabled = bool(self.creds.get("debug", False))
         self.session.set_debug(self.debug_enabled, DEBUG_DIR)
-        
+
     def _init_ui(self):
         main_layout = QVBoxLayout()
         header_bar = QHBoxLayout()
@@ -3677,7 +3716,7 @@ class AccessManager(QMainWindow):
 
         self.btn_newcheck = QPushButton("𝙉 신규 확인")
         self.btn_newcheck.setFont(QFont("Segoe UI", 9))
-        self.btn_newcheck.clicked.connect(self.open_new_viewer) 
+        self.btn_newcheck.clicked.connect(self.open_new_viewer)
 
         self.btn_request = QPushButton("🔍 요청 확인")
         self.btn_request.setFont(QFont("Segoe UI", 9))
@@ -3686,7 +3725,7 @@ class AccessManager(QMainWindow):
         self.btn_manual = QPushButton("📝 수동 입력")
         self.btn_manual.setFont(QFont("Segoe UI", 9))
         self.btn_manual.clicked.connect(self.open_manual_dialog)
-        
+
         self.btn_file = QPushButton("📂 파일 선택")
         self.btn_file.setFont(QFont("Segoe UI", 9))
         self.btn_file.clicked.connect(self.choose_file)
@@ -3696,7 +3735,7 @@ class AccessManager(QMainWindow):
         self.btn_settings.clicked.connect(self._open_settings)
         self.btn_api_settings = QPushButton('API 설정')
         self.btn_api_settings.clicked.connect(self._open_api_settings)
-        
+
         #file_bar.addWidget(self.file_label)
         file_bar.addStretch()
         file_bar.addWidget(self.btn_newcheck)
@@ -3741,11 +3780,11 @@ class AccessManager(QMainWindow):
             header.geometriesChanged.connect(lambda: header.updateSection(self.COL_SELECT))
         except Exception:
             pass
-        
+
         main_layout.addWidget(self.table)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._open_table_menu)
-        
+
         btn_bar = QHBoxLayout()
 
         self.btn_clear_log = QPushButton("🗑 로그 지우기")
@@ -3787,7 +3826,7 @@ class AccessManager(QMainWindow):
         btn_bar.addWidget(self.btn_run_complete)
         btn_bar.addWidget(self.btn_stop)
         main_layout.addLayout(btn_bar)
-        
+
         self.log = QTextEdit()
         self.log.setAcceptRichText(False)
         self.log.setLineWrapMode(QTextEdit.WidgetWidth)
@@ -3978,12 +4017,21 @@ class AccessManager(QMainWindow):
         menu.popup(pos)
 
     def open_new_viewer(self):
+        if self._closing:
+            return
+        existing = getattr(self,'_newdlg',None)
+        if existing is not None:
+            existing.show()
+            existing.raise_()
+            existing.activateWindow()
+            return
+        # Register the one persistent viewer before asynchronous session preparation.
+        self._newdlg = NewItemsViewer(self)
+        self._newdlg.btn_refresh.clicked.connect(self._load_new_items)
+        self._newdlg.show()
         def _after_ready(ok: bool):
-            if not ok:
+            if not ok or self._closing:
                 return
-            self._newdlg = NewItemsViewer(self)
-            self._newdlg.btn_refresh.clicked.connect(self._load_new_items)
-            self._newdlg.show()
             self._load_new_items()
 
         self.ensure_bus_session_async("폴더 생성 요청 조회", _after_ready)
@@ -4185,7 +4233,7 @@ class AccessManager(QMainWindow):
         self.trigger_session_process.emit([t])
 
     def run_complete(self):
-        if self.api_thread is not None or self.session.is_busy():
+        if self._closing or self._waiting_for_bus or self.api_thread is not None or self.session.is_busy():
             return
         self.stop_requested = False
         self._ignore_bus_results = False
@@ -4199,9 +4247,14 @@ class AccessManager(QMainWindow):
                 targets.append(self._bus_target(row))
             else:
                 self._log(f'{row+1}행: BUS 요청의 실제 API 성공 결과가 없어 완료 처리에서 제외했습니다.')
-        if not targets or not self._ensure_bus_session('완료 처리'):
+        if not targets:
             return
+        self._waiting_for_bus = True
+        ready = self._ensure_bus_session('완료 처리')
         self._waiting_for_bus = False
+        if not ready or self.stop_requested or self._closing:
+            self._set_running_ui(False)
+            return
         self._bus_mode = True
         self._bus_queue = targets
         self._bus_total = len(targets)
@@ -4255,7 +4308,7 @@ class AccessManager(QMainWindow):
         self._set_running_ui(False)
         self.btn_request.setEnabled(True)
         self.btn_settings.setEnabled(True)
-        
+
         if err:
             if err.strip() == "사용자 취소":
                 self._set_plain_status("요청 확인 취소됨")
@@ -4263,10 +4316,10 @@ class AccessManager(QMainWindow):
             self._set_plain_status("로드 실패")
             QMessageBox.critical(self, "오류", f"로드 실패: {err}")
             return
-        
+
         self._set_plain_status("로드 완료")
         self.load_excel(path, append=False, silent=False, source="bus")
-        
+
         try:
             end_combined = os.path.join(DL_DIR, "종료권한리스트_합본.xls")
             normal_combined = os.path.join(DL_DIR, "권한리스트_합본.xls")
@@ -4516,7 +4569,7 @@ class AccessManager(QMainWindow):
             dlg = ManualEntryDialog(self)
             if dlg.exec_() == QDialog.Accepted and dlg.result_row:
                 reqtype, user, proj, lv2, lv3, dept, role, kind = dlg.result_row
-                self.add_table_row(reqtype, user, proj, lv2, lv3, dept, role, kind)   
+                self.add_table_row(reqtype, user, proj, lv2, lv3, dept, role, kind)
         except Exception as e:
             self._log(f"[수동입력 오픈 예외] {e}")
             QMessageBox.critical(self, "오류", f"수동 입력 다이얼로그 실행 오류:\n{e}")
@@ -4529,7 +4582,7 @@ class AccessManager(QMainWindow):
 
             chk = QCheckBox()
             chk.setChecked(True)
-            
+
             wrapper = QWidget()
             layout = QHBoxLayout(wrapper)
             layout.addWidget(chk)
@@ -4538,7 +4591,7 @@ class AccessManager(QMainWindow):
             self.table.setCellWidget(r, self.COL_SELECT, wrapper)
 
             vals = [kind, reqtype or REQ_GRANT, user, "", proj, lv2, lv3, dept or "", role or "", "대기"]
-            
+
             for j, val in enumerate(vals, start=1):
                 col = j
                 it = QTableWidgetItem(str(val))
@@ -4612,7 +4665,7 @@ class AccessManager(QMainWindow):
             ext = os.path.splitext(file_path)[1].lower()
 
             start_offset = self.table.rowCount() if append else 0
-            
+
             rows = []
             identities = []
 
@@ -4621,10 +4674,10 @@ class AccessManager(QMainWindow):
                 ws = wb.active
                 header_raw = [str(c.value) if c.value is not None else "" for c in ws[1]]
                 colmap = auto_map_columns(header_raw)
-                
+
                 is_end = any(("열람" in (str(h) or "")) for h in header_raw)
                 kind = "종료" if is_end else "진행"
-                
+
                 required = {"user", "proj"} if is_end else {"user", "proj", "level2", "level3"}
                 missing = [k for k in required if k not in colmap]
                 if missing:
@@ -4633,11 +4686,11 @@ class AccessManager(QMainWindow):
 
                 def gv(row, key, default=""):
                     i = colmap.get(key)
-                    if i is None: 
+                    if i is None:
                         return default
                     v = row[i] if i < len(row) else None
                     return (str(v).strip() if v is not None else default)
-                
+
                 for r in ws.iter_rows(min_row=2, values_only=True):
                     if not any(r):
                         continue
@@ -4648,12 +4701,12 @@ class AccessManager(QMainWindow):
                     lv3     = "" if is_end else gv(r, "level3")
                     role    = gv(r, "role") if not is_end else ""
                     dept    = gv(r, "dept")
-                    
+
                     if not user_id or not proj:
                         continue
                     if not is_end and (not lv2 or not lv3):
                         continue
-                    
+
                     reqtype = REQ_RELEASE if _is_release_row_by_values(list(r), header_raw) else REQ_GRANT
                     path = build_path_l3(proj, lv2, lv3)
                     rows.append((kind, reqtype, user_id, name, proj, lv2, lv3, dept, role, "대기"))
@@ -4666,12 +4719,12 @@ class AccessManager(QMainWindow):
                 if not header_raw:
                     self._log("엑셀 로드 실패: .xls(HTML) 테이블을 찾지 못했습니다.")
                     return
-                
+
                 colmap = auto_map_columns(header_raw)
 
                 is_end = any(("열람" in (str(h) or "")) for h in header_raw)
                 kind = "종료" if is_end else "진행"
-                
+
                 required = {"user", "proj"} if is_end else {"user", "proj", "level2", "level3"}
                 missing = [k for k in required if k not in colmap]
                 if missing:
@@ -4680,7 +4733,7 @@ class AccessManager(QMainWindow):
 
                 def gv(row, key, default=""):
                     i = colmap.get(key)
-                    if i is None: 
+                    if i is None:
                         return default
                     v = row[i] if i < len(row) else None
                     return (str(v).strip() if v is not None else default)
@@ -4693,12 +4746,12 @@ class AccessManager(QMainWindow):
                     lv3     = "" if is_end else gv(r, "level3")
                     role    = gv(r, "role") if not is_end else ""
                     dept    = gv(r, "dept")
-                    
+
                     if not user_id or not proj:
                         continue
                     if not is_end and (not lv2 or not lv3):
                         continue
-                    
+
                     reqtype = REQ_RELEASE if _is_release_row_by_values(r, header_raw) else REQ_GRANT
                     path = build_path_l3(proj, lv2, lv3)
                     rows.append((kind, reqtype, user_id, name, proj, lv2, lv3, dept, role, "대기"))
@@ -4717,10 +4770,10 @@ class AccessManager(QMainWindow):
 
             for i, row in enumerate(rows):
                 r = base + i
-                
+
                 chk = QCheckBox()
                 chk.setChecked(True)
-                
+
                 wrapper = QWidget()
                 layout = QHBoxLayout(wrapper)
                 layout.addWidget(chk)
@@ -4762,23 +4815,23 @@ class AccessManager(QMainWindow):
             self._set_row_metadata(row,dict(source='test-client',request_id=new_client_request_id()))
             self.table.item(row,self.COL_STATUS).setText('수정됨 (수동 요청)')
 
-        
+
     def _open_table_menu(self, pos):
         row = self.table.indexAt(pos).row()
         m = QMenu(self)
         act_del_row = m.addAction("행 삭제")
         act_del_sel = m.addAction("선택 행 삭제")
         act_del_all = m.addAction("전체 삭제")
-        
+
         gpos = self.table.viewport().mapToGlobal(pos)
         act = m.exec_(gpos)
-        
+
         if act == act_del_row:
             self._delete_row(row)
         elif act == act_del_sel:
             self._delete_checked_rows()
         elif act == act_del_all:
-            self._delete_all_rows()     
+            self._delete_all_rows()
 
     def _delete_all_rows(self):
         self.table.blockSignals(True)
@@ -4987,7 +5040,7 @@ if __name__ == "__main__":
 
 if __name__ == "__main__":
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-    
+
     app = QApplication(sys.argv)
     app.setFont(QFont("Segoe UI", 9))
     window = AccessManager()
