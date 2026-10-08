@@ -32,7 +32,7 @@ from PyQt5.QtWidgets import (
     QSpinBox, QProgressBar, QAbstractButton
 )
 from PyQt5.QtGui import QFont, QGuiApplication, QKeySequence, QPainter, QTextOption, QTextCursor, QPixmap, QIcon
-from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QProcess, QTimer, QPoint, QSize
+from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QTimer, QPoint, QSize
 from openpyxl import load_workbook
 
 APP_NAME = "Folder Grant API Client"
@@ -211,7 +211,7 @@ def resource_path(rel_path: str) -> str:
     try:
         base = sys._MEIPASS
     except Exception:
-        base = os.path.abspath(".")
+        base = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, rel_path)
 
 
@@ -369,9 +369,6 @@ def closed_segment_from_proj(proj_raw: str) -> str:
     return seg + (("A" + suf_digits) if suf_digits else "")
 
 def build_closed_path_from_proj(proj_raw: str) -> str:
-    resolved = resolve_closed_path_from_proj(proj_raw)
-    if resolved:
-        return resolved
     return build_closed_candidate_paths_from_proj(proj_raw)[0]
 
 def build_closed_candidate_paths_from_proj(proj_raw: str) -> List[str]:
@@ -381,179 +378,18 @@ def build_closed_candidate_paths_from_proj(proj_raw: str) -> List[str]:
         os.path.join(CLOSED_ARCHIVE_ROOT, seg),
     ]
 
-def resolve_closed_path_from_proj(proj_raw: str) -> str:
-    for path in build_closed_candidate_paths_from_proj(proj_raw):
-        if os.path.isdir(path):
-            return path
-    return ""
 
-def generate_add_script_closed(user_id: str, proj_raw: str) -> str:
-    path = build_closed_path_from_proj(proj_raw)
-    return f"icacls '{psq(path)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rx';"
 
-def generate_remove_script_closed(user_id: str, proj_raw: str) -> str:
-    path = build_closed_path_from_proj(proj_raw)
-    return f"icacls '{psq(path)}' /t /remove '{user_id}@{DOMAIN_EMAIL_SUFFIX}';"
 
-def psq(s: str) -> str:
-    return (s or "").replace("'", "''")
 
-def pretty_cmd_lines(cmd: str) -> str:
-    s = cmd
-    s = re.sub(r';(?!\s*})', ';\n', s)
-    s = re.sub(r'}\s*(?=if\b)', '}\n', s)
-    s = re.sub(r'(?<!\n)\s*(?=\$fd\d+\s*=)', '\n', s)
-    s = re.sub(r'(?<!\n)\s*(?=icacls\s+)', '\n', s, flags=re.IGNORECASE)
-    s = re.sub(r'(?<!\n)\s*(?=(Add|Remove)-ADGroupMember\b)', '\n', s, flags=re.IGNORECASE)
-    s = re.sub(r'[ \t]+\n', '\n', s)
-    s = re.sub(r'(?m)^[ \t]+', '', s)
-    s = re.sub(r'\n{2,}', '\n', s)
-    return s.strip()
 
-def _legacy_needed_nums(role: str):
-    return LEGACY_STUDY_MAP.get(role, [])
 
-def _legacy_find_missing_dirs(stat_path: str, needed_nums):
-    missing = []
-    try:
-        for n in needed_nums:
-            pattern = os.path.join(stat_path, f"{n}.*")
-            candidates = [p for p in glob.glob(pattern) if os.path.isdir(p)]
-            if not candidates:
-                missing.append(n)
-    except Exception:
-        return needed_nums
-    return missing
 
-def build_legacy_study_add(user_id: str, stat_path: str, role: str) -> str:
-    nums = _legacy_needed_nums(role)
-    nums = [n for n in nums if n in (3, 4, 5, 8)]
-    lines = []
 
-    for n in nums:
-        lines.append(
-            f"$fd{n} = Get-ChildItem -Path '{psq(stat_path)}' -Directory | "
-            f"Where-Object {{ $_.Name -like '{n}.*' }};"
-        )
-    lines.append(f"icacls '{psq(stat_path)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
 
-    for n in nums:
-        lines.append(
-            f"if ($fd{n}) {{ icacls ('{psq(stat_path)}\\' + $fd{n}.Name) "
-            f"/grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm'; }}"
-        )
-    return " ".join(lines)
 
-def build_legacy_study_remove(user_id: str, stat_path: str, role: str) -> str:
-    nums = _legacy_needed_nums(role)
-    nums = [n for n in nums if n in (3, 4, 5, 8)]
-    lines = []
-    for n in nums:
-        lines.append(
-            f"$fd{n} = Get-ChildItem -Path '{psq(stat_path)}' -Directory | "
-            f"Where-Object {{ $_.Name -like '{n}.*' }};"
-        )
-    for n in nums:
-        lines.append(
-            f"if ($fd{n}) {{ icacls ('{psq(stat_path)}\\' + $fd{n}.Name) "
-            f"/t /remove '{user_id}@{DOMAIN_EMAIL_SUFFIX}'; }}"
-        )
-    return " ".join(lines)
 
-def build_legacy_isolated_add(user_id: str, path_l3: str) -> str:
-    return f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';"
 
-def build_legacy_isolated_remove(user_id: str, path_l3: str) -> str:
-    return f"icacls '{psq(path_l3)}' /t /remove '{user_id}@{DOMAIN_EMAIL_SUFFIX}';"
-
-def generate_add_script(user_id: str, proj_raw: str, lv2: str, lv3: str, role: str) -> str:
-    group_name = format_group_name(proj_raw, lv2)
-    path_l3 = build_path_l3(proj_raw, lv2, lv3)
-    lv2_norm = normalize_lv2(lv2)
-    role_clean = (role or "").strip()
-    is_stat_idmc = is_stat_idmc_lv3(lv3)
-    cmds = []
-
-    cmds.append(
-        f"try {{ Add-ADGroupMember -Identity '{psq(group_name)}' -Members '{psq(user_id)}' -ErrorAction Stop }} "
-        f"catch {{ throw ('Add-ADGroupMember failed: ' + $_.Exception.Message) }};"
-    )
-
-    if is_lv3_etc(lv3):
-        return ' '.join(cmds)
-
-    is_new = is_new_template(proj_raw)
-
-    if lv2_norm == "Study":
-        if not role_clean:
-            cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
-            return ' '.join(cmds)
-        if is_new:
-            if role_clean not in STUDY_ROLES or role_clean not in ROLE_MAP:
-                return ""
-            cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
-            for sub in ROLE_MAP[role_clean]:
-                cmds.append(f"icacls '{psq(path_l3)}\\{psq(sub)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
-        else:
-            cmds.append(build_legacy_study_add(user_id, path_l3, role_clean))
-
-    elif lv2_norm == "Isolated":
-        if is_stat_idmc:
-            if is_stat_idmc_new_policy(proj_raw):
-                if not role_clean:
-                    cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
-                    return ' '.join(cmds)
-                if role_clean and role_clean not in ISOLATED_STAT_IDMC_ROLE_MAP:
-                    return ""
-                if role_clean:
-                    cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
-                    blocked_subs = ISOLATED_STAT_IDMC_ROLE_MAP[role_clean]
-                    blocked_expr = "@(" + ",".join([f"'{psq(s)}'" for s in blocked_subs]) + ")"
-                    cmds.append(
-                        f"Get-ChildItem -Path '{psq(path_l3)}' -Directory | "
-                        f"Where-Object {{ {blocked_expr} -notcontains $_.Name }} | "
-                        f"ForEach-Object {{ icacls $_.FullName /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm' }};"
-                    )
-            else:
-                cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm' /t;")
-        elif is_new:
-            if not role_clean:
-                cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
-                return ' '.join(cmds)
-            if role_clean not in ISOLATED_ROLES:
-                return ""
-            iso_map = {
-                "Randomization Statistician": ["Random"],
-                "Blind Reviewer": ["Reviewer"],
-                "Unblind Reviewer": ["Random", "Reviewer"],
-            }
-            cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
-            for sub in iso_map[role_clean]:
-                cmds.append(f"icacls '{psq(path_l3)}\\{psq(sub)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
-        else:
-            if not role_clean:
-                cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
-                return ' '.join(cmds)
-            if role_clean != "Randomization Statistician":
-                return ""
-            cmds.append(build_legacy_isolated_add(user_id, path_l3))
-
-    else:
-        cmds.append(f"icacls '{psq(path_l3)}' /grant '{user_id}@{DOMAIN_EMAIL_SUFFIX}:(ci)(oi)rxm';")
-
-    return ' '.join(cmds)
-
-def generate_remove_script(user_id: str, proj_raw: str, lv2: str, lv3: str, role: str) -> str:
-    group_name = format_group_name(proj_raw, lv2)
-    path_l3 = build_path_l3(proj_raw, lv2, lv3)
-    cmds = []
-    cmds.append(f"Remove-ADGroupMember -Identity '{psq(group_name)}' -Members '{psq(user_id)}' -Confirm:$false;")
-
-    if is_lv3_etc(lv3):
-        return " ".join(cmds)
-
-    cmds.append(f"icacls '{psq(path_l3)}' /t /remove '{user_id}@{DOMAIN_EMAIL_SUFFIX}';")
-    return " ".join(cmds)
 
 def _extract_tables_from_html(s: str):
     tables = re.findall(r"<table[^>]*>(.*?)</table>", s, re.I | re.S)
@@ -653,6 +489,16 @@ def make_bus_request_id(values: dict, bus_identity: str = '') -> str:
 
 def new_client_request_id() -> str:
     return 'CLIENT-' + uuid4().hex
+
+
+def bus_row_identity(header, values) -> str:
+    fields = {str(h).strip(): str(v or '').strip() for h,v in zip(header,values)
+              if str(h).strip().lower() not in {'','순번','번호','no','no.','#','선택'}}
+    for name,value in fields.items():
+        if re.sub(r'[\s_-]+','',name).lower() in {'요청번호','신청번호','requestid','요청id','신청id'} and value:
+            return name + ':' + value
+    # Keep request dates and other original matching fields when no ID is exported.
+    return json.dumps(fields,ensure_ascii=False,sort_keys=True)
 
 
 class ApiClientError(RuntimeError):
@@ -795,6 +641,124 @@ class ApiJobWorker(QObject):
             self.finished.emit()
 
 
+def load_api_config() -> dict:
+    try:
+        with open(API_CONFIG_FILE,encoding='utf-8') as handle:
+            data = json.load(handle)
+        if isinstance(data,dict):
+            return dict(base_url=data.get('base_url',DEFAULT_API_URL),api_key=data.get('api_key',''))
+    except (OSError,ValueError):
+        pass
+    return dict(base_url=DEFAULT_API_URL,api_key='')
+
+
+class ApiConnectionTask(QObject):
+    succeeded = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def __init__(self,client):
+        super().__init__()
+        self.client = client
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            self.succeeded.emit(dict(health=self.client.health(),ready=self.client.ready()))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        finally:
+            self.finished.emit()
+
+
+class ApiSettingsDialog(QDialog):
+    def __init__(self,config,parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('API 연결 설정')
+        self.resize(500,220)
+        self.thread = None
+        self.task = None
+        layout = QFormLayout(self)
+        self.url = QLineEdit(config.get('base_url',DEFAULT_API_URL))
+        self.key = QLineEdit(config.get('api_key',''))
+        self.key.setEchoMode(QLineEdit.Password)
+        self.message = QLabel('API Key는 C:\\FGT\\conf\\api_client.json에 저장됩니다.')
+        self.message.setWordWrap(True)
+        layout.addRow('API 주소',self.url)
+        layout.addRow('X-API-Key',self.key)
+        self.check = QPushButton('연결 확인 (health / ready)')
+        self.check.clicked.connect(self._check_connection)
+        layout.addRow(self.check)
+        layout.addRow(self.message)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel)
+        self.buttons.accepted.connect(self._save)
+        self.buttons.rejected.connect(self.reject)
+        layout.addRow(self.buttons)
+
+    def values(self):
+        return dict(base_url=self.url.text().strip().rstrip('/'),api_key=self.key.text().strip())
+
+    def _validated_client(self):
+        values = self.values()
+        if not values['api_key']:
+            raise ValueError('API Key를 입력하세요.')
+        return FolderGrantApiClient(values['base_url'],values['api_key'])
+
+    def _check_connection(self):
+        if self.thread is not None:
+            return
+        try:
+            client = self._validated_client()
+        except ValueError as exc:
+            self.message.setText(str(exc)); return
+        self.thread = QThread(self)
+        self.task = ApiConnectionTask(client)
+        self.task.moveToThread(self.thread)
+        self.thread.started.connect(self.task.run)
+        self.task.succeeded.connect(lambda result:self.message.setText('API 연결 및 인증 확인 성공'))
+        self.task.failed.connect(self.message.setText)
+        self.task.finished.connect(self.task.deleteLater)
+        self.task.finished.connect(self.thread.quit,type=Qt.DirectConnection)
+        self.thread.finished.connect(self._connection_finished)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.check.setEnabled(False)
+        self.buttons.setEnabled(False)
+        self.url.setEnabled(False); self.key.setEnabled(False)
+        self.message.setText('연결 확인 중…')
+        self.thread.start()
+
+    def _connection_finished(self):
+        self.thread = None; self.task = None
+        self.check.setEnabled(True); self.buttons.setEnabled(True)
+        self.url.setEnabled(True); self.key.setEnabled(True)
+
+    def _save(self):
+        if self.thread is not None:
+            return
+        try:
+            self._validated_client()
+            os.makedirs(os.path.dirname(API_CONFIG_FILE),exist_ok=True)
+            temporary = API_CONFIG_FILE+'.tmp'
+            with open(temporary,'w',encoding='utf-8') as handle:
+                json.dump(self.values(),handle,ensure_ascii=False,indent=2)
+            if os.name != 'nt':
+                os.chmod(temporary,0o600)
+            os.replace(temporary,API_CONFIG_FILE)
+        except (OSError,ValueError) as exc:
+            self.message.setText(str(exc)); return
+        self.accept()
+
+    def reject(self):
+        if self.thread is None:
+            super().reject()
+
+    def closeEvent(self,event):
+        if self.thread is not None:
+            event.ignore()
+        else:
+            event.accept()
+
+
 class SettingsDialog(QDialog):
     def __init__(self, parent=None, saved=None, remembered=False, debug_on=False, fail_tol_default=5):
         try:
@@ -876,6 +840,7 @@ class SettingsDialog(QDialog):
             return 5
 
 class BusSessionManager(QObject):
+    stopped = pyqtSignal()
     readyChanged = pyqtSignal(bool, str)
     downloaded = pyqtSignal(str, str)
     busyChanged = pyqtSignal(bool)
@@ -1375,6 +1340,7 @@ class BusSessionManager(QObject):
                         pass
         finally:
             self._stopping = False
+            self.stopped.emit()
 
     @pyqtSlot()
     def cancel_current(self):
@@ -2202,6 +2168,7 @@ class BusSessionManager(QObject):
             self.processed.emit([{'row': t.get('row'), 'ok': False, 'msg': f'오류: {e}'} for t in (targets or [])])
 
 class BusWatcher(QObject):
+    stopped = pyqtSignal()
     readyChanged = pyqtSignal(bool, str)
     countsReady = pyqtSignal(dict)
 
@@ -2246,6 +2213,7 @@ class BusWatcher(QObject):
         except Exception:
             pass
         self.readyChanged.emit(False, "워처 정지됨")
+        self.stopped.emit()
 
     @pyqtSlot()
     def collect_counts(self):
@@ -2622,6 +2590,16 @@ class NewItemsViewer(QDialog):
         lay.addLayout(bar)
 
         self._last_worker_msg = ""
+        self.worker_thread = None
+        self.worker = None
+        self.chk_dry = QCheckBox('Dry Run')
+        self.chk_auto_complete = QCheckBox('실제 성공 후 BUS 완료')
+        self.chk_auto_complete.setChecked(True)
+        self.btn_stop = QPushButton('중지')
+        self.btn_stop.clicked.connect(lambda: self.worker.stop() if self.worker else None)
+        btns.insertWidget(0,self.chk_dry)
+        btns.insertWidget(1,self.chk_auto_complete)
+        btns.insertWidget(2,self.btn_stop)
 
     def _set_busy(self, on: bool, msg: str = ""):
         self.status_lbl.setText(msg or "")
@@ -2630,6 +2608,9 @@ class NewItemsViewer(QDialog):
         self.btn_create.setEnabled(not on)
         self.btn_refresh.setEnabled(not on)
         self.btn_close.setEnabled(not on)
+        self.chk_dry.setEnabled(not on)
+        self.chk_auto_complete.setEnabled(not on)
+        self.btn_stop.setEnabled(on)
         QApplication.processEvents()
 
     def _on_worker_progress(self, cur: int, total: int, message: str):
@@ -2637,37 +2618,25 @@ class NewItemsViewer(QDialog):
         self._last_worker_msg = message
         QApplication.processEvents()
 
-    def _on_worker_finished(self, ok_cnt: int, fail_cnt: int):
-        base = f"완료: 성공 {ok_cnt} / 실패 {fail_cnt}"
-        if fail_cnt > 0 and self._last_worker_msg:
-            base += f"\n마지막 메시지: {self._last_worker_msg}"
+    def _on_worker_finished(self,ok_cnt,fail_cnt):
+        self.status_lbl.setText(f'실제 성공 {ok_cnt} / 실패 {fail_cnt} — '+self._last_worker_msg)
 
-        self._set_busy(False, base)
-        try:
-            self.worker_thread.quit()
-            self.worker_thread.wait(1500)
-        except Exception:
-            pass
 
-        self.worker.deleteLater()
-        self.worker_thread.deleteLater()
-        self.worker = None
-        self.worker_thread = None
+    def _manual_add(self,proj,name):
+        if not self.tbl.columnCount():
+            self.set_data(['프로젝트코드','프로젝트명'],[])
+        row = self.tbl.rowCount()
+        self.tbl.insertRow(row)
+        checkbox = QCheckBox(); checkbox.setChecked(True)
+        holder = QWidget(); layout = QHBoxLayout(holder)
+        layout.addWidget(checkbox); layout.setContentsMargins(0,0,0,0)
+        self.tbl.setCellWidget(row,0,holder)
+        self.tbl.setItem(row,self._hidx['프로젝트코드'],QTableWidgetItem(proj))
+        self.tbl.setItem(row,self._hidx['프로젝트명'],QTableWidgetItem(name))
+        self.tbl.item(row,self._hidx['프로젝트코드']).setData(Qt.UserRole,
+            dict(source='test-client',request_id=new_client_request_id(),bus_done=False))
+        self.status_lbl.setText('수동 요청을 추가했습니다. Dry Run 또는 API 생성을 실행하세요.')
 
-    def _manual_add(self, proj: str, name: str):
-        parent = self.parent()
-        ps_path = getattr(parent, "ps_path", shutil.which("pwsh") or shutil.which("powershell") or "powershell")
-        ps_kind = getattr(parent, "ps_kind", "pwsh" if "pwsh" in os.path.basename(ps_path).lower() else "powershell")
-
-        worker = CreateWorker([], {}, ps_path, ps_kind)
-        self._set_busy(True, f"{proj} 폴더/권한 생성 중…")
-        ok, msg = worker._create_group_and_folder(proj, name)
-        self._set_busy(False, "")
-
-        if ok:
-            QMessageBox.information(self, "완료", f"{proj} 생성 완료")
-        else:
-            QMessageBox.critical(self, "오류", f"{proj} 생성 실패: {msg}")
 
     def _on_manual_clicked(self):
         dlg = ManualNewRequestDialog(self)
@@ -2748,6 +2717,19 @@ class NewItemsViewer(QDialog):
 
         self._hidx = { (self.tbl.horizontalHeaderItem(i).text() or ""): i
                        for i in range(1, self.tbl.columnCount()) }
+        col = self._hidx.get('프로젝트코드',-1)
+        name_col = self._hidx.get('프로젝트명',self._hidx.get('과제명',self._hidx.get('제목',-1)))
+        for row in range(self.tbl.rowCount()):
+            item = self.tbl.item(row,col) if col >= 0 else None
+            name_item = self.tbl.item(row,name_col) if name_col >= 0 else None
+            if item:
+                values = dict(proj=item.text(),project_name=name_item.text() if name_item else '')
+                identity = bus_row_identity(header,rows[row])
+                try:
+                    request_id = make_bus_request_id(values,identity)
+                except ValueError:
+                    request_id = new_client_request_id()
+                item.setData(Qt.UserRole,dict(source='bus',request_id=request_id,bus_done=False))
 
     def _toggle_all_rows(self, checked: bool):
         t = self.tbl
@@ -2780,141 +2762,117 @@ class NewItemsViewer(QDialog):
                 items.append((proj, pname))
         return items
 
-    def _run_pwsh(self, cmd: str) -> tuple[bool, str]:
-        try:
-            parent = self.parent()
-            if parent and hasattr(parent, "_wrap_cmd_utf8") and hasattr(parent, "_pick_powershell"):
-                wrapped = parent._wrap_cmd_utf8(cmd)
-                ps_path, _ = parent._pick_powershell()
-            else:
-                wrapped = cmd
-                ps_path = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
-
-            p = QProcess(self)
-            args = ["-NoLogo","-NoProfile","-ExecutionPolicy","Bypass","-Command", wrapped]
-            p.start(ps_path, args)
-            if not p.waitForStarted(30000):
-                return False, "PowerShell 시작 실패"
-
-            if not p.waitForFinished(300000):
-                try:
-                    p.kill(); p.waitForFinished(3000)
-                except Exception:
-                    pass
-                return False, "PowerShell 실행 시간 초과"
-
-            rc  = p.exitCode()
-            out = bytes(p.readAllStandardOutput()).decode("utf-8","ignore").strip()
-            err = bytes(p.readAllStandardError()).decode("utf-8","ignore").strip()
-            return (rc == 0), (err or out)
-        except Exception as e:
-            return False, f"예외: {e}"
 
     def _on_create_clicked(self):
-        items = []
-        t = self.tbl
-        proj_col = None; name_col = None
-        for c in range(1, t.columnCount()):
-            h = t.horizontalHeaderItem(c)
-            ht = (h.text() if h else "").strip()
-            if ht == "프로젝트코드": proj_col = c
-            if ht in ("프로젝트명", "과제명", "제목"): name_col = c
-        if proj_col is None:
-            QMessageBox.warning(self, "알림", "프로젝트코드 컬럼을 찾을 수 없습니다."); return
-
-        for r in range(t.rowCount()):
-            w = t.cellWidget(r, 0)
-            if not w: continue
-            cb = w.findChild(QCheckBox)
-            if not (cb and cb.isChecked()): 
-                continue
-            proj = (t.item(r, proj_col).text().strip() if t.item(r, proj_col) else "")
-            name = (t.item(r, name_col).text().strip() if (name_col is not None and t.item(r, name_col)) else "")
-            if proj:
-                items.append({"proj": proj, "name": name})
-
-        if not items:
-            QMessageBox.information(self, "알림", "선택된 항목이 없습니다."); return
-
         parent = self.parent()
-        creds = getattr(parent, "creds", {}) if parent else {}
-        if not creds.get("id") or not creds.get("pw"):
-            QMessageBox.warning(self, "알림", "BUS 계정이 필요합니다. 설정에서 저장 후 다시 시도하세요.")
+        if self.worker_thread is not None or parent.api_thread is not None or parent.session.is_busy():
             return
-
-        ps_path = getattr(parent, "ps_path", shutil.which("pwsh") or shutil.which("powershell") or "powershell")
-        ps_kind = getattr(parent, "ps_kind", "pwsh" if "pwsh" in os.path.basename(ps_path).lower() else "powershell")
-
+        if not parent.api_config.get('api_key'):
+            parent._open_api_settings()
+            if not parent.api_config.get('api_key'):
+                return
+        items = []
+        code_col = self._hidx.get('프로젝트코드',-1)
+        name_col = self._hidx.get('프로젝트명',self._hidx.get('과제명',self._hidx.get('제목',-1)))
+        if code_col < 0:
+            return
+        for row in range(self.tbl.rowCount()):
+            holder = self.tbl.cellWidget(row,0)
+            checkbox = holder.findChild(QCheckBox) if holder else None
+            code_item = self.tbl.item(row,code_col)
+            if not checkbox or not checkbox.isChecked() or not code_item:
+                continue
+            meta = dict(code_item.data(Qt.UserRole) or {})
+            if meta.get('bus_done'):
+                continue
+            project = code_item.text().strip()
+            name_item = self.tbl.item(row,name_col) if name_col >= 0 else None
+            name = name_item.text().strip() if name_item else ''
+            try:
+                canonical_project_code(project)
+            except ValueError as exc:
+                QMessageBox.warning(self,'입력 확인',str(exc)); return
+            items.append(dict(proj=project,name=name,row=row,**meta))
+        if not items:
+            return
+        parent.stop_requested = False
+        parent._set_running_ui(True)
+        self._set_busy(True,'API 프로젝트 작업 시작')
         self.worker_thread = QThread(self)
-        self.worker = CreateWorker(items, creds, ps_path, ps_kind)
+        self.worker = CreateWorker(items,dict(parent.creds),parent._api_client(),
+                                   dry_run=self.chk_dry.isChecked(),
+                                   auto_complete=self.chk_auto_complete.isChecked(),
+                                   requested_by=parent._requester())
         self.worker.moveToThread(self.worker_thread)
-
-        self.worker.progress.connect(self._on_worker_progress)
-        self.worker.finished.connect(self._on_worker_finished)
-        self.worker.error.connect(lambda msg: QMessageBox.critical(self, "오류", msg))
-
         self.worker_thread.started.connect(self.worker.run)
-
-        self._set_busy(True, f"처리 시작… (대상 {len(items)}건)")
-        self.prg.setRange(0, 0)
+        self.worker.progress.connect(self._on_worker_progress)
+        self.worker.itemResult.connect(self._on_project_result)
+        self.worker.finished.connect(self._on_worker_finished)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.worker.finished.connect(self.worker_thread.quit,type=Qt.DirectConnection)
+        self.worker_thread.finished.connect(self._project_thread_finished)
+        self.worker_thread.finished.connect(self.worker_thread.deleteLater)
         self.worker_thread.start()
 
+
+    def _on_project_result(self,row,result):
+        col = self._hidx.get('프로젝트코드',-1)
+        item = self.tbl.item(row,col) if col >= 0 else None
+        if item:
+            meta = dict(item.data(Qt.UserRole) or {})
+            meta.update(result=result,bus_done=result.get('bus_done',False))
+            item.setData(Qt.UserRole,meta)
+            item.setToolTip(json.dumps(result,ensure_ascii=False,indent=2))
+        self.parent()._log('프로젝트 결과: '+json.dumps(result,ensure_ascii=False,indent=2))
+
+
+    def _project_thread_finished(self):
+        self.worker = None
+        self.worker_thread = None
+        self._set_busy(False,self.status_lbl.text())
+        self.parent()._set_running_ui(False)
+
+
+    def closeEvent(self,event):
+        if self.worker_thread is not None and self.worker_thread.isRunning():
+            self.worker.stop()
+            event.ignore()
+        else:
+            event.accept()
+
+
+    def reject(self):
+        if self.worker_thread is not None:
+            self.worker.stop()
+            return
+        super().reject()
+
+
 class CreateWorker(QObject):
+    itemResult = pyqtSignal(int,dict)
     progress = pyqtSignal(int, int, str)
     finished = pyqtSignal(int, int)
     error = pyqtSignal(str)
 
-    def __init__(self, items, creds, ps_path, ps_kind, parent=None):
+    def __init__(self,items,creds,client,dry_run=False,auto_complete=True,requested_by='client-operator',parent=None):
         super().__init__(parent)
-        self.items = items
-        self.creds = creds
-        self.ps_path = ps_path
-        self.ps_kind = ps_kind
+        self.items,self.creds,self.client = items,creds,client
+        self.dry_run,self.auto_complete,self.requested_by = dry_run,auto_complete,requested_by
         self._stop = False
+        self._active_job = None
+
 
     def stop(self):
         self._stop = True
+        if self._active_job is not None:
+            self._active_job.stop()
 
-    def _wrap_cmd_utf8(self, cmd: str) -> str:
-        pre = "$OutputEncoding=[System.Text.Encoding]::UTF8; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
-        if self.ps_kind == "powershell":
-            pre += " chcp 65001 > $null;"
-        return pre + " " + cmd
 
-    def _run_pwsh(self, cmd: str, timeout_ms=180000) -> (bool, str):
-        from PyQt5.QtCore import QProcess
-        p = QProcess()
-        p.start(self.ps_path, ["-NoLogo","-NoProfile","-ExecutionPolicy","Bypass","-Command", self._wrap_cmd_utf8(cmd)])
-        if not p.waitForStarted(15000):
-            return False, "PowerShell 시작 실패"
 
-        deadline = time.time() + (timeout_ms/1000.0)
-        ok = False
-        while time.time() < deadline:
-            if self._stop:
-                try:
-                    p.kill()
-                    p.waitForFinished(3000)
-                except Exception:
-                    pass
-                return False, "사용자 중지"
-            QApplication.processEvents()
-            if p.waitForFinished(50):
-                ok = (p.exitCode() == 0)
-                break
-        if not ok and p.state() == QProcess.Running:
-            try:
-                p.kill()
-                p.waitForFinished(3000)
-            except Exception:
-                pass
-            return False, "PowerShell 실행 시간 초과"
-
-        out = bytes(p.readAllStandardOutput()).decode("utf-8","ignore")
-        err = bytes(p.readAllStandardError()).decode("utf-8","ignore")
-        return ok, (err.strip() or out.strip())
 
     def _bus_click_process(self, proj_code: str) -> (bool, str):
+        if self._stop:
+            return False, '사용자 중지'
         d = None
         stage = "INIT"
         bus_msg_title = ""
@@ -3141,6 +3099,8 @@ class CreateWorker(QObject):
                 return False, f"BTN_NOT_FOUND @ {stage}"
 
             stage = "CLICK_PROCESS_BUTTON"
+            if self._stop:
+                return False, '사용자 중지 (BUS 완료 미실행)'
             try:
                 d.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
                 try:
@@ -3176,6 +3136,8 @@ class CreateWorker(QObject):
                 bus_msg_body = ""
 
             stage = "CLICK_CONFIRM_POPUP"
+            if self._stop:
+                return False, '사용자 중지 (BUS 확인 미실행)'
             try:
                 ok_btn = WebDriverWait(popup, 5).until(
                     EC.element_to_be_clickable((By.CSS_SELECTOR, "button.swal2-confirm"))
@@ -3265,101 +3227,56 @@ class CreateWorker(QObject):
                 except Exception:
                     pass
 
-    def _create_group_and_folder(self, proj: str, proj_name: str) -> (bool, str):
-        group_name = format_group_name(proj, "Study")
-        root_path  = build_root_from_proj(proj)
-        study_all  = os.path.join(root_path, "study", "all")
-
-        TEMPLATE_ROOT = r"\\LSK_S010\Study folder\_Template"
-        GROUP_OU_PATH = r"OU=Group Project Folder,OU=0.Management Object Group,OU=lskglobal,DC=lskglobal,DC=com"
-
-        ps = []
-        ps.append("$ErrorActionPreference='Stop';")
-        ps.append(
-            f"$g = Get-ADGroup -Filter \"SamAccountName -eq '{psq(group_name)}'\";"
-        )
-        ps.append(
-            f"if (-not $g) {{ "
-            f"New-ADGroup -Name '{psq(group_name)}' -SamAccountName '{psq(group_name)}' "
-            f"-GroupCategory Security -GroupScope DomainLocal "
-            f"-Path '{psq(GROUP_OU_PATH)}' -Description '{psq(proj_name or '')}'; "
-            f"Start-Sleep -Seconds 15; "
-            f"}} else {{ Write-Host 'GROUP_EXISTS'; }}"
-        )
-        ps.append(
-            f"if (!(Test-Path '{psq(root_path)}')) {{ "
-            f"robocopy '{psq(TEMPLATE_ROOT)}' '{psq(root_path)}' *.* /E /COPYALL | Out-Null; }}"
-        )
-        ps.append(
-            f"$paths = @('{psq(root_path)}', '{psq(study_all)}'); "
-            "foreach($p in $paths) { "
-            "if (Test-Path $p) { "
-            "$acl = Get-Acl $p; $unknown = @(); "
-            "foreach($ace in $acl.Access) { "
-            "$val = $ace.IdentityReference.Value; "
-            "if ($val -and $val -match '^S-1-') { $unknown += $val; continue } "
-            "try { "
-                "$null = $ace.IdentityReference.Translate([System.Security.Principal.NTAccount]); "
-            "} catch { "
-                "$val = $ace.IdentityReference.Value; "
-                "if ($val -and $val -match '^S-1-') { $unknown += $val } "
-                "elseif ($val) { $unknown += $val } "
-            "} "
-            "} "
-            "$unknown = $unknown | Sort-Object -Unique; "
-            "foreach($sid in $unknown) { "
-            "try { icacls \"$p\" /remove \"$sid\" /T /C | Out-Null; } catch {} "
-            "} "
-            "} "
-            "} "
-        )
-        ps.append(
-            f"if (Test-Path '{psq(root_path)}') {{ "
-            f"icacls '{psq(root_path)}' /grant '{psq(group_name)}:(ci)(oi)rx' | Out-Null; }}"
-        )
-        ps.append(
-            f"if (Test-Path '{psq(study_all)}') {{ "
-            f"icacls '{psq(study_all)}' /grant '{psq(group_name)}:(ci)(oi)rxm' | Out-Null; }}"
-        )
-
-        cmd = " ".join(ps)
-        ok, out = self._run_pwsh(cmd, timeout_ms=240000)
-        return ok, out
 
     def run(self):
-        total = len(self.items)
-        ok_cnt = fail_cnt = 0
+        ok_count = fail_count = 0
+        try:
+            for index,item in enumerate(self.items):
+                if self._stop:
+                    break
+                self.progress.emit(index,len(self.items),f"{item['proj']} API 작업 중")
+                source = item.get('source','test-client')
+                request_id = item.get('request_id') or new_client_request_id()
+                payload = make_project_payload(item['proj'],item.get('name',''),request_id,source,self.requested_by)
+                cached = item.get('result',{})
+                if not self.dry_run and can_complete_bus(cached,source) and not item.get('bus_done'):
+                    result = dict(cached)
+                else:
+                    self._active_job = ApiJobWorker(self.client,'project',payload,self.dry_run)
+                    if self._stop:
+                        self._active_job.stop()
+                    try:
+                        result = self._active_job.execute()
+                    except Exception as exc:
+                        result = dict(status='failed',error_message=str(exc))
+                    self._active_job = None
+                result = dict(result)
+                real_success = result.get('status')=='succeeded' and result.get('executor_mode')=='powershell'
+                if real_success:
+                    ok_count += 1
+                elif result.get('status') not in {'preview','simulated'}:
+                    fail_count += 1
+                message = f"{item['proj']} API {result.get('status')}: {result.get('error_message') or ''}"
+                if self.auto_complete and can_complete_bus(result,source,self._stop or result.get('client_stopped',False)):
+                    if not self.creds.get('id') or not self.creds.get('pw'):
+                        result['bus_done'] = False
+                        message += ' / BUS 계정 누락: 완료만 재시도 가능'
+                    else:
+                        bus_ok,bus_message = self._bus_click_process(item['proj'])
+                        result['bus_done'] = bus_ok
+                        message += ' / BUS '+bus_message
+                self.itemResult.emit(item.get('row',index),result)
+                self.progress.emit(index+1,len(self.items),message)
+        except Exception as exc:
+            message = str(exc)
+            if self.client.api_key:
+                message = message.replace(self.client.api_key,'[API Key]')
+            self.error.emit(message)
+            fail_count += 1
+        finally:
+            self._active_job = None
+            self.finished.emit(ok_count,fail_count)
 
-        if not self.creds.get("id") or not self.creds.get("pw"):
-            self.error.emit("BUS 계정(아이디/비밀번호) 누락")
-            self.finished.emit(0, total)
-            return
-
-        for idx, it in enumerate(self.items, start=1):
-            if self._stop:
-                self.finished.emit(ok_cnt, fail_cnt)
-                return
-
-            proj = it.get("proj","").strip()
-            name = it.get("name","").strip()
-
-            self.progress.emit(idx-1, total, f"[{idx}/{total}] {proj} 폴더/권한 생성 중…")
-            ok, msg = self._create_group_and_folder(proj, name)
-            if not ok:
-                fail_cnt += 1
-                self.progress.emit(idx, total, f"[{idx}/{total}] {proj} 실패: {msg}")
-                continue
-
-            self.progress.emit(idx-1, total, f"[{idx}/{total}] {proj} BUS 처리 중…")
-            b_ok, b_msg = self._bus_click_process(proj)
-            if b_ok:
-                ok_cnt += 1
-                self.progress.emit(idx, total, f"[{idx}/{total}] {proj} 완료")
-            else:
-                fail_cnt += 1
-                self.progress.emit(idx, total, f"[{idx}/{total}] {proj} BUS 실패: {b_msg}")
-
-        self.finished.emit(ok_cnt, fail_cnt)
 
 class BadgeToolButton(QWidget):
     def __init__(self, *args, **kwargs):
@@ -3463,6 +3380,7 @@ class BadgeToolButton(QWidget):
         """)
 
 class AccessManager(QMainWindow):
+    trigger_new_download = pyqtSignal()
     trigger_session_start = pyqtSignal()
     trigger_session_download = pyqtSignal()
     trigger_session_cancel = pyqtSignal()
@@ -3693,15 +3611,17 @@ class AccessManager(QMainWindow):
         self.watch_session.readyChanged.connect(self._on_watcher_ready)
         self.trigger_session_start.connect(self.session.start, type=Qt.QueuedConnection)
         self.trigger_session_download.connect(self.session.download_list, type=Qt.QueuedConnection)
+        self.trigger_new_download.connect(self.session.download_new_list,type=Qt.QueuedConnection)
         self.trigger_session_process.connect(self.session.process, type=Qt.QueuedConnection)
         self.trigger_session_cancel.connect(self.session.cancel_current, type=Qt.QueuedConnection)
         self.trigger_session_stop.connect(self.session.stop, type=Qt.QueuedConnection)
         QTimer.singleShot(1000, self.refresh_notifications)
-        self.ps_path, self.ps_kind = self._pick_powershell()
-        self.proc = QProcess(self)
-        self.proc.readyReadStandardOutput.connect(self._ps_ready_out)
-        self.proc.readyReadStandardError.connect(self._ps_ready_err)
-        self.proc.finished.connect(self._ps_finished)
+        self.api_config = load_api_config()
+        self.api_thread = None
+        self.api_worker = None
+        self._closing = False
+        self._shutdown_started = False
+        QTimer.singleShot(0,self._show_initial_api_settings)
         self.run_queue = []
         self.total_jobs = 0
         self.done_jobs = 0
@@ -3822,6 +3742,8 @@ class AccessManager(QMainWindow):
         self.btn_settings = QPushButton("⚙ 설정")
         self.btn_settings.setFont(QFont("Segoe UI", 9))
         self.btn_settings.clicked.connect(self._open_settings)
+        self.btn_api_settings = QPushButton('API 설정')
+        self.btn_api_settings.clicked.connect(self._open_api_settings)
         
         #file_bar.addWidget(self.file_label)
         file_bar.addStretch()
@@ -3830,6 +3752,7 @@ class AccessManager(QMainWindow):
         file_bar.addWidget(self.btn_manual)
         file_bar.addWidget(self.btn_file)
         file_bar.addWidget(self.btn_settings)
+        file_bar.addWidget(self.btn_api_settings)
         main_layout.addLayout(file_bar)
 
         self.table = CopyTable()
@@ -4114,15 +4037,16 @@ class AccessManager(QMainWindow):
         self.ensure_bus_session_async("폴더 생성 요청 조회", _after_ready)
 
     def _load_new_items(self):
+        if self.api_thread is not None or self.session.is_busy():
+            return
         try:
             self.session.newDownloaded.disconnect(self._on_new_downloaded)
         except Exception:
             pass
         self.session.newDownloaded.connect(self._on_new_downloaded)
-        self.status_label.setText("폴더 생성 요청 조회 중")
         self._set_running_ui(True)
-        self.trigger_session_start.emit()
-        self.session.download_new_list()
+        self.trigger_new_download.emit()
+
 
     def _on_new_downloaded(self, path: str, err: str):
         self._set_running_ui(False)
@@ -4139,68 +4063,6 @@ class AccessManager(QMainWindow):
             self._newdlg.set_data(header, data)
         self._set_plain_status(f"폴더 생성 요청 {len(data)}건")
 
-    def _create_group_and_base_acl(self, proj: str, lv2: str, lv3: str) -> (bool, str):
-        try:
-            group_name = format_group_name(proj, lv2)
-            is_isolated = (normalize_lv2(lv2) == "Isolated")
-
-            base_group = format_group_name(proj, "Study")
-
-            root_path = build_root_from_proj(proj)
-            isolated_path = os.path.join(root_path, "Isolated")
-
-            lines = []
-            lines.append("$ErrorActionPreference='Stop';")
-
-            if is_isolated:
-                lines.append(f"$desc = try {{ (Get-ADGroup -Identity '{psq(base_group)}' -Properties Description).Description }} catch {{ '' }};")
-                lines.append(
-                    "New-ADGroup "
-                    f"-Name '{psq(group_name)}' -SamAccountName '{psq(group_name)}' "
-                    "-GroupCategory Security -GroupScope DomainLocal "
-                    f"-Path '{psq(GROUP_OU_PATH)}' -Description $desc;"
-                )
-                lines.append("Start-Sleep -s 15;")
-                lines.append(f"if (Test-Path '{psq(root_path)}') {{ icacls '{psq(root_path)}' /grant '{psq(group_name)}:rx' | Out-Null; }}")
-                lines.append(f"if (Test-Path '{psq(isolated_path)}') {{ icacls '{psq(isolated_path)}' /grant '{psq(group_name)}:rx' | Out-Null; }}")
-            else:
-                lines.append(
-                    "New-ADGroup "
-                    f"-Name '{psq(group_name)}' -SamAccountName '{psq(group_name)}' "
-                    "-GroupCategory Security -GroupScope DomainLocal "
-                    f"-Path '{psq(GROUP_OU_PATH)}' -Description '';"
-                )
-                lines.append(f"if (!(Test-Path '{psq(root_path)}')) {{ robocopy '{psq(TEMPLATE_ROOT)}' '{psq(root_path)}' *.* /E /COPYALL | Out-Null; }}")
-                lines.append(f"if (Test-Path '{psq(root_path)}') {{ icacls '{psq(root_path)}' /grant '{psq(group_name)}:(ci)(oi)rx' | Out-Null; }}")
-                lines.append(f"if (Test-Path '{psq(os.path.join(root_path,'study','all'))}') {{ icacls '{psq(os.path.join(root_path,'study','all'))}' /grant '{psq(group_name)}:(ci)(oi)rxm' | Out-Null; }}")
-
-            cmd = " ".join(lines)
-            wrapped = self._wrap_cmd_utf8(cmd)
-            p = QProcess(self)
-            args = ["-NoLogo","-NoProfile","-ExecutionPolicy","Bypass","-Command", wrapped]
-            p.start(self.ps_path, args)
-
-            if not p.waitForStarted(30000):
-                return False, "PowerShell 시작 실패"
-
-            if not p.waitForFinished(120000):
-                try:
-                    p.kill()
-                    p.waitForFinished(3000)
-                except Exception:
-                    pass
-                return False, "PowerShell 실행 시간 초과"
-
-            rc = p.exitCode()
-            out = bytes(p.readAllStandardOutput()).decode("utf-8","ignore")
-            err = bytes(p.readAllStandardError()).decode("utf-8","ignore")
-            if rc != 0:
-                return False, (err.strip() or out.strip() or f"New-ADGroup 실패(code={rc})")
-
-            self._log(f"[보안그룹 생성] {group_name} 완료")
-            return True, "OK"
-        except Exception as e:
-            return False, f"예외: {e}"
 
     def _refresh_has_rows(self):
         has_rows = self.table.rowCount() > 0
@@ -4371,158 +4233,52 @@ class AccessManager(QMainWindow):
         self.trigger_session_process.emit([t])
 
     def run_complete(self):
-        self._ignore_bus_results = False
-        self._waiting_for_bus = False
-        self._pending_after_add_row = None
+        if self.api_thread is not None or self.session.is_busy():
+            return
         self.stop_requested = False
-        self.auto_complete_after_add = self.chk_auto_complete.isChecked()
-        
-        if self.table.rowCount() == 0:
-            QMessageBox.information(self, "알림", "대상이 없습니다.")
-            return
-
-        if self.session.is_busy():
-            QMessageBox.warning(self, "알림", "다른 작업이 실행 중입니다. 잠시 후 다시 시도하세요.")
-            return
-
-        if not self._ensure_bus_session("완료 처리"):
-            return
-
-        allowed_status = {"추가완료", "제거완료", "DryRun"}
+        self._ignore_bus_results = False
         targets = []
-        skipped = []
-
-        for r in range(self.table.rowCount()):
-            w = self.table.cellWidget(r, self.COL_SELECT)
-            cb = w.findChild(QCheckBox) if w else None
-            if not (cb and cb.isChecked()):
+        for row in range(self.table.rowCount()):
+            if not self._is_row_checked(row):
                 continue
-
-            st = (self.table.item(r, self.COL_STATUS).text().strip()
-                  if self.table.item(r, self.COL_STATUS) else "")
-
-            if st not in allowed_status:
-                skipped.append(f"{r+1}행: 상태가 '{st}'이므로 완료처리 불가")
-                continue
-
-            kind = (self._get(r, self.COL_KIND) or "").strip()
-
-            user = self._get(r, self.COL_USER)
-            proj = self._get(r, self.COL_PROJ)
-            lv2  = self._get(r, self.COL_LV2)
-            lv3  = self._get(r, self.COL_LV3)
-            path = "" if kind == "종료" else build_path_l3(proj, lv2, lv3)
-
-            if kind == "종료":
-                if not (user and proj):
-                    skipped.append(f"{r+1}행: (종료) 필수 정보 누락(user/proj)")
-                    continue
-                path = build_closed_path_from_proj(proj)
+            meta = self._row_metadata(row)
+            result = meta.get('result',{})
+            if (not meta.get('bus_done') and can_complete_bus(result,meta.get('source'),result.get('client_stopped',False))):
+                targets.append(self._bus_target(row))
             else:
-                if not (user and proj and lv2 and lv3):
-                    skipped.append(f"{r+1}행: (진행) 필수 정보 누락(user/proj/lv2/lv3)")
-                    continue
-
-            reqtype = (self._get(r, self.COL_REQTYPE) or REQ_GRANT).strip()
-            targets.append({
-                'row': r, 'kind': kind, 'user': user, 'proj': proj, 'lv2': lv2, 'lv3': lv3, 'path': path, 'req': reqtype
-            })
-
-        if skipped:
-            QMessageBox.information(self, "완료 제외 안내", "\n".join(skipped))
-
-        if not targets:
+                self._log(f'{row+1}행: BUS 요청의 실제 API 성공 결과가 없어 완료 처리에서 제외했습니다.')
+        if not targets or not self._ensure_bus_session('완료 처리'):
             return
-
-        deduped = []
-        seen = set()
-        for t in targets:
-            key = (t['user'], t['proj'], t['lv2'], t['lv3'], (t.get('path') or '').split('\\')[-1])
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(t)
-        targets = deduped
-
-        if not targets:
-            self._set_running_ui(False)
-            self.status_label.setText("완료 처리할 항목 없음")
-            return
-
-        self.total_jobs = 0
-        self.done_jobs = 0
-
+        self._waiting_for_bus = False
         self._bus_mode = True
-        self._bus_queue = targets[:]
-        self._bus_total = len(self._bus_queue)
+        self._bus_queue = targets
+        self._bus_total = len(targets)
         self._bus_done = 0
         self._progress_started_at = time.time()
         self._set_running_ui(True)
-        self._set_progress_status("BUS 완료 처리 중", "", self._bus_done, self._bus_total, running=True)
         self._start_next_bus_item()
 
+
     def _on_session_processed(self, results):
-        if getattr(self, "_ignore_bus_results", False):
+        if self._ignore_bus_results:
             return
-        is_auto_wait = getattr(self, "_waiting_for_bus", False)
-        pending_row = getattr(self, "_pending_after_add_row", None)
-
-        if (not is_auto_wait) and (not self.run_queue) and (self.proc.state() != QProcess.Running):
-            self._set_running_ui(False)
-
-        ok_cnt = fail_cnt = 0
-        lines = []
-        for r in (results or []):
-            row = r.get('row', -1)
-            ok = bool(r.get('ok'))
-            msg = (r.get('msg') or "").strip()
-
+        for result in results or []:
+            row = result.get('row',-1)
             if 0 <= row < self.table.rowCount():
-                cur = self.table.item(row, self.COL_STATUS)
-                if cur and cur.text().strip() == "중지됨":
-                    continue
-
-            if 0 <= row < self.table.rowCount():
-                it = self.table.item(row, self.COL_STATUS)
-                if it:
-                    if ok:
-                        req = (self._get(row, self.COL_REQTYPE) or REQ_GRANT).strip()
-                        self.refresh_notifications()
-                        it.setText("제거완료" if req == REQ_RELEASE else "추가완료")
-                        ok_cnt += 1
-                    else:
-                        it.setText(f"처리실패: {msg}")
-                        fail_cnt += 1
-
-            disp_no = (row + 1) if (0 <= row < self.table.rowCount()) else "?"
-            if ok:
-                lines.append(f"#{disp_no} BUS 완료 처리됨")
-            else:
-                reason = msg if msg else "실패"
-                lines.append(f"#{disp_no} BUS 완료 처리 실패 ({reason})")
-
-        if lines:
-            self._log("\n".join(lines))
-        self._set_progress_status(f"완료 처리 결과: 성공 {ok_cnt}건 / 실패 {fail_cnt}건", "", self._progress_done, self._progress_total, running=True)
-
+                meta = self._row_metadata(row)
+                meta['bus_done'] = bool(result.get('ok'))
+                self._set_row_metadata(row,meta)
+                self.table.item(row,self.COL_STATUS).setText('BUS 완료' if result.get('ok') else 'BUS 실패 (완료만 재시도)')
+                self._log(f"{row+1}행 BUS 결과: {result.get('msg','')}")
         if self._bus_mode:
             self._bus_done += len(results or [])
-            self._set_progress_status("BUS 완료 처리 중", "", self._bus_done, self._bus_total, running=True)
-            self.refresh_notifications()
             self._start_next_bus_item()
-            return
-
-        if is_auto_wait:
-            matched = any(res.get('row') == pending_row for res in (results or []))
-            self._waiting_for_bus = False if matched else self._waiting_for_bus
-            self._pending_after_add_row = None if matched else self._pending_after_add_row
-
-            if self.run_queue:
+        elif self._waiting_for_bus:
+            if any(r.get('row')==self._pending_after_add_row for r in results or []):
+                self._waiting_for_bus = False
+                self._pending_after_add_row = None
                 self._start_next_job()
-            else:
-                self._finish_progress_status("완료")
-                self._set_running_ui(False)
-                self.refresh_notifications()
+
 
     def _on_session_ready(self, ok: bool, msg: str):
         if ok:
@@ -4541,7 +4297,7 @@ class AccessManager(QMainWindow):
                 self._log(f"[세션 준비 콜백 오류] {e}")
 
     def _on_session_busy(self, b: bool):
-        self._set_running_ui(b)
+        self._set_running_ui(b or self.api_thread is not None or self._waiting_for_bus)
 
     def _on_session_downloaded(self, path: str, err: str):
         self._set_running_ui(False)
@@ -4557,15 +4313,15 @@ class AccessManager(QMainWindow):
             return
         
         self._set_plain_status("로드 완료")
-        self.load_excel(path, append=False, silent=False)
+        self.load_excel(path, append=False, silent=False, source="bus")
         
         try:
             end_combined = os.path.join(DL_DIR, "종료권한리스트_합본.xls")
             normal_combined = os.path.join(DL_DIR, "권한리스트_합본.xls")
             if os.path.basename(path) == "권한리스트_합본.xls" and os.path.exists(end_combined):
-                self.load_excel(end_combined, append=True, silent=True)
+                self.load_excel(end_combined, append=True, silent=True, source="bus")
             elif os.path.basename(path) == "종료권한리스트_합본.xls" and os.path.exists(normal_combined):
-                self.load_excel(normal_combined, append=True, silent=True)
+                self.load_excel(normal_combined, append=True, silent=True, source="bus")
         except Exception:
             pass
 
@@ -4601,55 +4357,37 @@ class AccessManager(QMainWindow):
             json.dump({"id": id_, "pw": pw_, "debug": bool(debug_), "theme": getattr(self, "current_theme", "light")},
                       f, ensure_ascii=False, indent=2)
 
-    def closeEvent(self, e):
-        try:
-            if hasattr(self, "session") and self.session:
-                self.trigger_session_cancel.emit()
-                end = time.time() + 2.0
-                while time.time() < end and self.session.is_busy():
-                    QApplication.processEvents()
-                    time.sleep(0.02)
+    def closeEvent(self,event):
+        self._closing = True
+        if self.api_thread is not None and self.api_thread.isRunning():
+            self.api_worker.stop()
+            event.ignore()
+            return
+        newdlg = getattr(self,'_newdlg',None)
+        if newdlg and getattr(newdlg,'worker_thread',None) and newdlg.worker_thread.isRunning():
+            newdlg.worker.stop()
+            event.ignore()
+            QTimer.singleShot(200,self.close)
+            return
+        self.notify_timer.stop()
+        self._progress_timer.stop()
+        self.session.cancel_current()
+        if self.session.is_busy() or self.watch_session._mgr.is_busy():
+            event.ignore()
+            QTimer.singleShot(200,self.close)
+            return
+        if not self._shutdown_started:
+            self._shutdown_started = True
+            self.session.stopped.connect(self.session_thread.quit, type=Qt.DirectConnection)
+            self.watch_session.stopped.connect(self.watch_thread.quit, type=Qt.DirectConnection)
+            self.trigger_session_stop.emit()
+            self.trigger_watcher_stop.emit()
+        if self.session_thread.isRunning() or self.watch_thread.isRunning():
+            event.ignore()
+            QTimer.singleShot(100,self.close)
+            return
+        event.accept()
 
-            if hasattr(self, "session") and self.session:
-                self.trigger_session_stop.emit()
-                end2 = time.time() + 1.0
-                while time.time() < end2:
-                    QApplication.processEvents()
-                    time.sleep(0.02)
-
-            if hasattr(self, "session_thread") and self.session_thread:
-                self.session_thread.quit()
-                self.session_thread.wait(1500)
-
-            if hasattr(self, "watch_session"):
-                self.trigger_watcher_stop.emit()
-                
-            if hasattr(self, "watch_thread") and self.watch_thread:
-                self.watch_thread.quit()
-                self.watch_thread.wait(1500)
-
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, "session") and getattr(self.session, "driver", None):
-                try:
-                    self.session.driver.quit()
-                except Exception:
-                    pass
-
-            if hasattr(self, "watch_session"):
-                mgr = getattr(self.watch_session, "_mgr", None)
-                drv = getattr(mgr, "driver", None) if mgr else None
-                if drv:
-                    try:
-                        drv.quit()
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-        
-        super().closeEvent(e)
 
     def _open_settings(self):
         current_debug = bool(self.creds.get("debug", False))
@@ -4736,35 +4474,26 @@ class AccessManager(QMainWindow):
     def _stop_all(self):
         self.run_queue = []
         self.stop_requested = True
-        
-        try:
-            if hasattr(self, "session"):
-                self.trigger_session_cancel.emit()
-        except Exception:
-            pass
-        if self.proc.state() == QProcess.Running:
-            try:
-                self.proc.terminate()
-                self.proc.waitForFinished(1500)
-                if self.proc.state() == QProcess.Running:
-                    self.proc.kill()
-                    self.proc.waitForFinished(1500)
-            except Exception:
-                pass
-
-        for r in range(self.table.rowCount()):
-            it = self.table.item(r, self.COL_STATUS)
-            if it and (it.text().strip() == "실행중" or it.text().startswith("완료 처리중")):
-                it.setText("중지됨")
-
         self._ignore_bus_results = True
         self._waiting_for_bus = False
-        self._pending_after_add_row = None
-        self._set_running_ui(False)
-        self._finish_progress_status("사용자 중지", stopped=True)
-        self.btn_stop.setEnabled(False)
+        self._bus_queue = []
+        self._bus_mode = False
+        self.session.cancel_current()
+        if self.api_worker is not None:
+            self.api_worker.stop()
+            self._log('API 취소 요청 후 최종 상태를 기다립니다.')
+        newdlg = getattr(self,'_newdlg',None)
+        if newdlg and getattr(newdlg,'worker',None):
+            newdlg.worker.stop()
+        if self.api_thread is None and not self.session.is_busy():
+            self._set_running_ui(False)
+        self._finish_progress_status('중지 요청됨',stopped=True)
+
 
     def _set_running_ui(self, running: bool):
+        running = running or getattr(self,'api_thread',None) is not None or getattr(self,'_waiting_for_bus',False)
+        newdlg = getattr(self,'_newdlg',None)
+        running = running or bool(newdlg and getattr(newdlg,'worker_thread',None))
         if running:
             self._set_progress_status(
                 getattr(self, "_progress_detail", "") or "처리 중",
@@ -4775,6 +4504,7 @@ class AccessManager(QMainWindow):
             )
 
         to_disable = [
+            getattr(self, "btn_api_settings", None),
             getattr(self, "btn_manual", None),
             getattr(self, "btn_file", None),
             getattr(self, "btn_run_execute", None),
@@ -4793,241 +4523,45 @@ class AccessManager(QMainWindow):
         if hasattr(self, "btn_stop") and self.btn_stop:
             self.btn_stop.setEnabled(running)
 
+        self.setAcceptDrops(not running)
+        if hasattr(self,'table'):
+            self.table.setEditTriggers(QAbstractItemView.NoEditTriggers if running else (QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked | QAbstractItemView.EditKeyPressed))
         if hasattr(self, "table") and self.table:
             self.table.setContextMenuPolicy(Qt.PreventContextMenu if running else Qt.CustomContextMenu)
 
-    def _wrap_cmd_utf8(self, cmd: str) -> str:
-        pre = "$OutputEncoding=[System.Text.Encoding]::UTF8; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
-        if self.ps_kind == "powershell":
-            pre = pre + " chcp 65001 > $null;"
-        return pre + " " + cmd
 
-    def _pick_powershell(self):
-        p = shutil.which("pwsh")
-        if p: return p, "pwsh"
-        p = shutil.which("powershell")
-        return (p if p else "powershell"), "powershell"
 
     def _start_next_job(self):
-        if self.stop_requested or not self.run_queue:
+        if self.api_thread is not None or self._waiting_for_bus:
+            return
+        if self._closing or self.stop_requested or not self.run_queue:
             self._set_running_ui(False)
+            self._finish_progress_status('중지됨' if self.stop_requested else '완료', stopped=self.stop_requested)
             return
-        
-        (seq, row, cmd, pretty, mode, reqtype, user, proj, lv2, lv3, path) = self.run_queue.pop(0)
-        self.run_queue_cmd = cmd
-        self.run_queue_pretty = pretty
-        self.current_mode = mode
+        row,payload,dry = self.run_queue.pop(0)
         self.current_row = row
-        self.current_seq = seq
-        kind = (self._get(row, self.COL_KIND) or "").strip()    
-        self._current_reqtype = reqtype
-        self._current_target = {'row': row, 'kind': kind, 'user': user, 'proj': proj, 'lv2': lv2, 'lv3': lv3, 'path': path, 'req': reqtype}
-        is_closed = (not (lv2 or "").strip()) and (not (lv3 or "").strip())
-        if is_closed:
-            self._log(f"#{seq} {mode.upper()} {user} / {proj} 시작")
-        else:
-            self._log(f"#{seq} {mode.upper()} {user} / {proj} / {lv2} / {lv3} 시작")
+        self.current_seq = self.done_jobs+1
+        self.current_mode = 'add' if payload['operation']=='grant' else 'remove'
+        self.table.item(row,self.COL_STATUS).setText('Preview 조회 중' if dry else 'API 실행중')
+        self._log(f"API {'Preview' if dry else 'Job'} 요청: {payload['request_id']}")
+        thread = QThread(self)
+        worker = ApiJobWorker(self._api_client(),'access',payload,dry)
+        self.api_thread,self.api_worker = thread,worker
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_api_progress)
+        worker.succeeded.connect(self._on_api_result)
+        worker.failed.connect(self._on_api_error)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit, type=Qt.DirectConnection)
+        thread.finished.connect(self._api_thread_finished)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
 
-        itm = self.table.item(row, self.COL_STATUS)
-        if itm:
-            itm.setText("실행중")
-        self.table.blockSignals(False)
 
-        self._cur_cmd = cmd
-        self._cur_pretty = pretty
 
-        wrapped = self._wrap_cmd_utf8(cmd)
-        args = ["-NoLogo","-NoProfile","-ExecutionPolicy","Bypass","-Command", wrapped]
-        self._set_running_ui(True)
-        self._buf_out[self.current_seq] = []
-        self.proc.start(self.ps_path, args)
-        action_detail = "폴더 권한 부여 중" if mode == "add" else "폴더 권한 제거 중"
-        self._set_progress_status(action_detail, proj, self.done_jobs, self.total_jobs, running=True)
 
-    def _filter_log_lines(self, mode: str, raw: str):
-        lines = [ (line or "").strip() for line in raw.splitlines() if (line or "").strip() ]
 
-        if mode == "remove":
-            keep = []
-
-            for s in lines:
-                if ("ERROR" in s or "Error" in s or 
-                    "Access is denied" in s or "Access denied" in s or "denied" in s.lower()):
-                    keep.append(s)
-
-            summary_re = re.compile(r"Successfully processed\s+\d+\s+files;?\s+Failed processing\s+\d+\s+files", re.IGNORECASE)
-            summaries = [s for s in lines if summary_re.search(s)]
-            if summaries:
-                keep.append(summaries[-1])
-
-            return keep
-
-        keep = []
-        for s in lines:
-            if any(k in s for k in (
-                "ERROR", "Error", "Access is denied", "denied", "Access denied",
-                "processed file:", "Successfully processed", "Failed processing"
-            )) or re.search(r'\b(Success|Fail(ed)?|Denied|removed|grant(ed)?)\b', s, re.I):
-                keep.append(s)
-        return keep
-
-    def _ps_ready_out(self):
-        raw = bytes(self.proc.readAllStandardOutput()).decode("utf-8", errors="ignore")
-        if not raw:
-            return
-        lines = self._filter_log_lines(self.current_mode, raw)
-        if lines:
-            tagged = [f"#{self.current_seq} {line}" for line in lines]
-            self._buf_out.setdefault(self.current_seq, []).extend(tagged)
-
-    def _ps_ready_err(self):
-        raw = bytes(self.proc.readAllStandardError()).decode("utf-8", errors="ignore")
-        if not raw:
-            return
-        lines = self._filter_log_lines(self.current_mode, raw)
-        if not lines:
-            lines = [x.strip() for x in raw.splitlines() if x.strip()]
-        if lines:
-            tagged = [f"#{self.current_seq} {line}" for line in lines]
-            self._buf_out.setdefault(self.current_seq, []).extend(tagged)
-
-    def _ps_finished(self, code, status):
-        try:
-            buf = self._buf_out.pop(self.current_seq, [])
-        except Exception:
-            buf = []
-
-        is_remove = (self.current_mode == "remove")
-
-        fail_cnt = 0
-        succ_cnt = 0
-        if is_remove:
-            for line in buf:
-                m_fail = re.search(r'Failed processing\s+(\d+)', line, re.I)
-                if m_fail:
-                    fail_cnt += int(m_fail.group(1))
-                m_succ = re.search(r'Successfully processed\s+(\d+)', line, re.I)
-                if m_succ:
-                    succ_cnt = max(succ_cnt, int(m_succ.group(1)))
-
-            if fail_cnt == 0:
-                extra_fails = [l for l in buf if any(k in l for k in (
-                    "Failed processing", "ERROR", "Error", "Access is denied", "Access denied", "denied"
-                ))]
-                fail_cnt = len(extra_fails)
-
-            tol = int(getattr(self, "remove_fail_tolerance", 5))
-            self._log(f"#{self.current_seq} 제거 요약: 성공 {succ_cnt} / 실패 {fail_cnt} (허용 {tol})")
-
-            effective_code = 0 if (fail_cnt <= tol) else 1
-
-        else:
-            if buf:
-                self._log("\n".join(buf))
-            effective_code = 0 if code == 0 else 1
-
-        missing_group = False
-        buf_text = "\n".join([b.split("#", 1)[-1].strip() if "#" in b else b for b in (buf or [])])
-
-        if self.current_mode == "add" and effective_code != 0:
-            if ("개체를 찾을 수 없습니다" in buf_text) or ("Cannot find an object with identity" in buf_text):
-                missing_group = True
-
-        if missing_group and not getattr(self, "_retrying_after_group_create", False):
-            do_create = False
-
-            if getattr(self, "_auto_create_group_decided", None) is True:
-                do_create = True
-            else:
-                mb = QMessageBox(self)
-                mb.setWindowTitle("보안그룹 생성")
-                mb.setIcon(QMessageBox.Question)
-                gname = format_group_name(self._current_target.get('proj',''), self._current_target.get('lv2',''))
-                mb.setText(f"보안그룹 '{gname}' 이(가) 없습니다.\n생성 후 계속 진행할까요?")
-                btn_continue = mb.addButton("계속", QMessageBox.AcceptRole)
-                btn_cancel   = mb.addButton("취소", QMessageBox.RejectRole)
-                cb = QCheckBox("이번 세션 동안 자동 생성(다시 묻지 않음)", mb)
-                mb.setCheckBox(cb)
-                mb.exec_()
-                do_create = (mb.clickedButton() == btn_continue)
-                if do_create and cb.isChecked():
-                    self._auto_create_group_decided = True
-
-            if do_create:
-                ok_create, msg_create = self._create_group_and_base_acl(
-                    proj=self._current_target.get('proj',''),
-                    lv2=self._current_target.get('lv2',''),
-                    lv3=self._current_target.get('lv3','')
-                )
-                if ok_create:
-                    self._retrying_after_group_create = True
-
-                    self.run_queue.insert(0, (
-                        self.current_seq, self.current_row,
-                        getattr(self, "_cur_cmd", ""), getattr(self, "_cur_pretty", ""),
-                        self.current_mode, self._current_reqtype,
-                        self._current_target.get('user'), self._current_target.get('proj'),
-                        self._current_target.get('lv2'), self._current_target.get('lv3'),
-                        self._current_target.get('path')
-                    ))
-
-                    self._start_next_job()
-                    return
-                else:
-                    self._log(f"[보안그룹 생성 실패] {msg_create}")
-
-        if self.current_mode != "remove":
-            req_label = "권한 부여" if self._current_reqtype == REQ_GRANT else "권한 제거"
-            if effective_code == 0:
-                self._log(f"#{self.current_seq} {req_label} 완료")
-            else:
-                reason = "실패"
-                try:
-                    reason = (buf[-1].split("#", 1)[-1].strip() if buf else "실패")
-                except Exception:
-                    pass
-                self._log(f"#{self.current_seq} {req_label} 실패 ({reason})")
-
-        self.done_jobs += 1
-
-        if 0 <= self.current_row < self.table.rowCount():
-            if effective_code == 0:
-                ok = "추가완료" if self.current_mode == "add" else "제거완료"
-                self.table.item(self.current_row, self.COL_STATUS).setText(ok)
-
-                if (self.auto_complete_after_add
-                    and not self.chk_dry.isChecked()
-                    and self.session.is_ready()
-                    and not self.stop_requested):
-                    try:
-                        tgt = dict(self._current_target)
-                        tgt["req"] = REQ_GRANT if self.current_mode == "add" else REQ_RELEASE
-                        self._waiting_for_bus = True
-                        self._pending_after_add_row = self.current_row
-                        self.table.item(self.current_row, self.COL_STATUS).setText("완료 처리중")
-                        self.trigger_session_process.emit([tgt])
-                    except Exception as e:
-                        self._log(f"[완료처리 요청 실패] row={self.current_row+1 if self.current_row>=0 else '?'} / {e}")
-                        self._waiting_for_bus = False
-                        self._pending_after_add_row = None
-            else:
-                self.table.item(self.current_row, self.COL_STATUS).setText("실패")
-
-        self._set_progress_status(
-            "완료 처리 대기 중" if self._waiting_for_bus else ("폴더 권한 부여 중" if self.current_mode == "add" else "폴더 권한 제거 중"),
-            self._current_target.get('proj', '') if getattr(self, "_current_target", None) else "",
-            self.done_jobs,
-            self.total_jobs,
-            running=True,
-        )
-        self._retrying_after_group_create = False
-        if not self._waiting_for_bus:
-            if self.run_queue:
-                self._start_next_job()
-            else:
-                self._finish_progress_status("완료" if not getattr(self, "stop_requested", False) else "중지됨", stopped=getattr(self, "stop_requested", False))
-                self._set_running_ui(False)
-                self.stop_requested = False
 
     def open_manual_dialog(self):
         try:
@@ -5070,12 +4604,16 @@ class AccessManager(QMainWindow):
         finally:
             self.table.blockSignals(False)
 
+        self._set_row_metadata(r,dict(source='test-client',request_id=new_client_request_id(),bus_done=False))
         if (kind or "").strip() == "종료":
             self._log(f"수동 입력 추가: 구분={kind}, 요청={reqtype}, 사번={user}, 프로젝트={proj}")
         else:
             self._log(f"수동 입력 추가: 구분={kind}, 요청={reqtype}, 사번={user}, 프로젝트={proj}, L2={lv2}, L3={lv3}, ROLE={'없음' if not role else role}")
 
     def _log(self, message: str, seq: int = None, dry: bool = False):
+        api_key = getattr(self,'api_config',{}).get('api_key','')
+        if api_key:
+            message = message.replace(api_key,'[API Key]')
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         dry_str = " Dry" if dry else ""
         tag = f"{dry_str} #{seq}" if seq is not None else ""
@@ -5118,7 +4656,7 @@ class AccessManager(QMainWindow):
         if path.lower().endswith((".xlsx",".xls")):
             self.load_excel(path)
 
-    def load_excel(self, file_path: str, append: bool = False, silent: bool = False):
+    def load_excel(self, file_path: str, append: bool = False, silent: bool = False, source: str = 'test-client'):
         try:
             self.table.blockSignals(True)
             #if not (append and silent):
@@ -5128,6 +4666,7 @@ class AccessManager(QMainWindow):
             start_offset = self.table.rowCount() if append else 0
             
             rows = []
+            identities = []
 
             if ext == ".xlsx":
                 wb = load_workbook(file_path, data_only=True)
@@ -5170,6 +4709,9 @@ class AccessManager(QMainWindow):
                     reqtype = REQ_RELEASE if _is_release_row_by_values(list(r), header_raw) else REQ_GRANT
                     path = build_path_l3(proj, lv2, lv3)
                     rows.append((kind, reqtype, user_id, name, proj, lv2, lv3, dept, role, "대기"))
+                    identities.append(bus_row_identity(header_raw,r))
+
+                wb.close()
 
             elif ext == ".xls":
                 header_raw, data_rows = _parse_html_best_table(file_path)
@@ -5212,6 +4754,7 @@ class AccessManager(QMainWindow):
                     reqtype = REQ_RELEASE if _is_release_row_by_values(r, header_raw) else REQ_GRANT
                     path = build_path_l3(proj, lv2, lv3)
                     rows.append((kind, reqtype, user_id, name, proj, lv2, lv3, dept, role, "대기"))
+                    identities.append(bus_row_identity(header_raw,r))
 
             else:
                 self._log(f"엑셀 로드 실패: 지원하지 않는 확장자 ({ext})")
@@ -5247,6 +4790,13 @@ class AccessManager(QMainWindow):
                         it.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
                     self.table.setItem(r, col, it)
 
+            for row in range(base,base+len(rows)):
+                values = self._row_values(row)
+                try:
+                    request_id = make_bus_request_id(values,identities[row-base]) if source=='bus' else new_client_request_id()
+                except ValueError:
+                    request_id = new_client_request_id()
+                self._set_row_metadata(row,dict(source=source,request_id=request_id,bus_done=False))
             hv = self.table.horizontalHeader()
             hv.setStretchLastSection(True)
 
@@ -5256,14 +4806,14 @@ class AccessManager(QMainWindow):
         finally:
             self.table.blockSignals(False)
 
-    def _on_cell_changed(self, row, col):
+    def _on_cell_changed(self,row,col):
         if col == self.COL_STATUS:
             return
+        meta = self._row_metadata(row)
+        if meta:
+            self._set_row_metadata(row,dict(source='test-client',request_id=new_client_request_id()))
+            self.table.item(row,self.COL_STATUS).setText('수정됨 (수동 요청)')
 
-        if col in self.EDITABLE_COLS:
-            st = self.table.item(row, self.COL_STATUS)
-            if st:
-                st.setText("검증필요")
         
     def _open_table_menu(self, pos):
         row = self.table.indexAt(pos).row()
@@ -5309,71 +4859,15 @@ class AccessManager(QMainWindow):
             if self._is_row_checked(r):
                 self.table.removeRow(r)
 
-    def validate_row(self, row: int, mode: str = "add") -> (bool, str):
-        kind = (self._get(row, self.COL_KIND) or "").strip()
-        proj = self._get(row, self.COL_PROJ).strip()
+    def validate_row(self, row, mode='add'):
+        try:
+            meta = self._row_metadata(row)
+            make_access_payload(self._row_values(row), meta.get('request_id') or new_client_request_id(),
+                                meta.get('source','test-client'), self._requester())
+            return True, ''
+        except ValueError as exc:
+            return False, f'{row+1}행: {exc}'
 
-        if kind == "종료":
-            if not proj:
-                return False, f"{row+1}행: 종료 과제 실행에 필요한 필드(proj) 누락"
-            path = resolve_closed_path_from_proj(proj)
-            if not path:
-                candidates = build_closed_candidate_paths_from_proj(proj)
-                return False, (
-                    f"{row+1}행: 종료 과제 경로를 찾을 수 없습니다.\n"
-                    f"확인 경로:\n- " + "\n- ".join(candidates)
-                )
-            return True, ""
-
-        role = self._get(row, self.COL_ROLE).strip()
-        lv2  = self._get(row, self.COL_LV2).strip()
-        lv3  = self._get(row, self.COL_LV3).strip()
-
-        if mode == "remove":
-            if not (proj and lv2 and lv3):
-                return False, f"{row+1}행: 제거 실행에 필요한 필드(proj/lv2/lv3) 누락"
-            return True, ""
-
-        lv2_norm = normalize_lv2(lv2)
-        is_new = is_new_template(proj)
-
-        if not role:
-            return True, ""
-
-        if lv2_norm == "Study":
-            if role not in STUDY_ROLES:
-                return False, f"{row+1}행: Study에서는 허용되지 않는 STATROLE '{role}'"
-            if is_new and role not in ROLE_MAP:
-                return False, f"{row+1}행: 신버전 Study에서 STATROLE '{role}' 매핑 없음(ROLE_MAP 보강 필요)"
-            if not is_new:
-                needed = _legacy_needed_nums(role)
-                stat_path = build_path_l3(proj, lv2, lv3)
-                missing = _legacy_find_missing_dirs(stat_path, needed)
-                if missing:
-                    miss_str = ", ".join(map(str, missing))
-                    return False, (
-                        f"{row+1}행: 레거시 Study 폴더 부족 → 필요한 번호 폴더({miss_str}) 없음\n"
-                        f"경로: {stat_path}\n조치: 폴더 생성/정정 후 다시 실행하세요."
-                    )
-
-        elif lv2_norm == "Isolated":
-            if is_stat_idmc_lv3(lv3):
-                if is_stat_idmc_new_policy(proj):
-                    if role not in ISOLATED_STAT_IDMC_ROLE_MAP:
-                        return False, f"{row+1}행: STAT_IDMC 폴더에 허용되지 않는 Role. 확인 필요. ('{role} = ROLE_MAP 매핑 없음')"
-            elif is_new:
-                if role not in ISOLATED_ROLES:
-                    return False, f"{row+1}행: Isolated에서는 허용되지 않는 STATROLE '{role}'"
-            else:
-                if role != "Randomization Statistician":
-                    return False, f"{row+1}행: 과거 Isolated 폴더는 'Randomization Statistician'만 가능 (현재 '{role}')"
-                iso_path = build_path_l3(proj, lv2, lv3)
-                if not os.path.isdir(iso_path):
-                    return False, f"{row+1}행: Isolated 경로 없음 → {iso_path}\n조치: 경로 확인/생성 후 다시 실행하세요."
-        else:
-            return False, f"{row+1}행: Level2 '{lv2}'에서는 STATROLE 사용 불가"
-
-        return True, ""
 
     def toggle_all_rows(self, checked: bool):
         for r in range(self.table.rowCount()):
@@ -5382,93 +4876,152 @@ class AccessManager(QMainWindow):
                 cb.setChecked(checked)
 
     def run_execute(self):
+        if self.api_thread is not None or self.session.is_busy() or self._waiting_for_bus:
+            return
+        if not self.api_config.get('api_key'):
+            self._open_api_settings()
+            if not self.api_config.get('api_key'):
+                return
+        self.stop_requested = False
         self._ignore_bus_results = False
         self._waiting_for_bus = False
-        self._pending_after_add_row = None
-        self.stop_requested = False
         self.auto_complete_after_add = self.chk_auto_complete.isChecked()
-
-        if self.table.rowCount() == 0:
-            self._log("실행할 데이터가 없습니다."); return
-        if self.session.is_busy():
-            QMessageBox.warning(self, "알림", "다른 작업이 실행 중입니다. 잠시 후 다시 시도하세요."); return
-
-        dry = self.chk_dry.isChecked()
-        seq = 0
-        failed_msgs = []
         queue = []
-
-        for r in range(self.table.rowCount()):
-            w = self.table.cellWidget(r, self.COL_SELECT)
-            cb = w.findChild(QCheckBox) if w else None
-            if not (cb and cb.isChecked()):
+        for row in range(self.table.rowCount()):
+            if not self._is_row_checked(row):
                 continue
-
-            kind    = (self._get(r, self.COL_KIND) or "").strip()
-            reqtype = (self._get(r, self.COL_REQTYPE) or REQ_GRANT).strip()
-            mode    = "add" if reqtype == REQ_GRANT else "remove"
-
-            ok, reason = (True, "")
-            if mode == "add":
-                ok, reason = self.validate_row(r, mode="add")
-            else:
-                ok, reason = self.validate_row(r, mode="remove")
-
+            ok, reason = self.validate_row(row)
             if not ok:
-                self.table.item(r, self.COL_STATUS).setText("검증실패")
-                short = reason.splitlines()[0]
-                self.table.item(r, self.COL_STATUS).setText(f"검증실패: {short}")
+                self.table.item(row,self.COL_STATUS).setText('검증실패')
                 self._log(reason)
-                failed_msgs.append(reason)
                 continue
-
-            user = self._get(r, self.COL_USER)
-            proj = self._get(r, self.COL_PROJ)
-            lv2  = self._get(r, self.COL_LV2)
-            lv3  = self._get(r, self.COL_LV3)
-            role = self._get(r, self.COL_ROLE)
-            
-            if kind == "종료":
-                path = build_closed_path_from_proj(proj)
-                cmd  = generate_add_script_closed(user, proj) if mode == "add" else generate_remove_script_closed(user, proj)
-            else:
-                path = build_path_l3(proj, lv2, lv3)
-                cmd  = generate_add_script(user, proj, lv2, lv3, role) if mode == "add" else generate_remove_script(user, proj, lv2, lv3, role)
-
-            body = pretty_cmd_lines(cmd) if cmd else "(생성된 명령 없음)"
-
-            if dry:
-                seq += 1
-                self._log(body, seq=seq, dry=True)
-                self.table.blockSignals(True)
-                self.table.item(r, self.COL_STATUS).setText("DryRun")
-                self.table.blockSignals(False)
-                continue
-
-            if not cmd:
-                continue
-
-            seq += 1
-            queue.append((seq, r, cmd, body, mode, reqtype, user, proj, lv2, lv3, path))
-
-        if failed_msgs:
-            QMessageBox.warning(self, "검증 실패 요약", "아래 항목은 검증 실패로 실행하지 않았습니다.\n\n" + "\n\n".join(failed_msgs))
-
+            meta = self._row_metadata(row)
+            if not meta:
+                meta = dict(source='test-client',request_id=new_client_request_id())
+            values = self._row_values(row)
+            # Keep the original operator when retrying the same idempotent payload.
+            payload = meta.get('payload') or make_access_payload(values,meta['request_id'],meta['source'],self._requester())
+            meta['payload'] = payload
+            if not self.chk_dry.isChecked():
+                meta['result'] = {}
+            self._set_row_metadata(row,meta)
+            queue.append((row,payload,self.chk_dry.isChecked()))
         if not queue:
             return
-
+        self.run_queue = queue
         self.total_jobs = len(queue)
         self.done_jobs = 0
         self._progress_started_at = time.time()
-        self._progress_done = 0
-        self._progress_total = self.total_jobs
         self._set_running_ui(True)
-        self.run_queue = queue
         self._start_next_job()
+
 
     def _get(self, row: int, col: int) -> str:
         it = self.table.item(row, col)
         return it.text().strip() if it else ""
+
+    def _show_initial_api_settings(self):
+        if not self.api_config.get('api_key'):
+            self._open_api_settings()
+
+
+    def _open_api_settings(self):
+        if self.api_thread is not None or self._waiting_for_bus:
+            return
+        dialog = ApiSettingsDialog(self.api_config, self)
+        if dialog.exec_() == QDialog.Accepted:
+            self.api_config = dialog.values()
+            self._log('API 연결 설정을 저장했습니다. API Key는 로그에 기록하지 않습니다.')
+
+
+    def _api_client(self):
+        return FolderGrantApiClient(self.api_config.get('base_url', DEFAULT_API_URL),
+                                   self.api_config.get('api_key', ''))
+
+
+    def _requester(self):
+        import getpass
+        return self.creds.get('id') or getpass.getuser() or 'client-operator'
+
+
+    def _row_values(self, row):
+        return dict(kind=self._get(row, self.COL_KIND), req=self._get(row, self.COL_REQTYPE),
+                    user=self._get(row, self.COL_USER), proj=self._get(row, self.COL_PROJ),
+                    lv2=self._get(row, self.COL_LV2), lv3=self._get(row, self.COL_LV3),
+                    role=self._get(row, self.COL_ROLE))
+
+
+    def _row_metadata(self, row):
+        item = self.table.item(row, self.COL_STATUS)
+        return dict(item.data(Qt.UserRole) or {}) if item else {}
+
+
+    def _set_row_metadata(self, row, meta):
+        item = self.table.item(row, self.COL_STATUS)
+        if item:
+            old = self.table.blockSignals(True)
+            item.setData(Qt.UserRole, dict(meta))
+            self.table.blockSignals(old)
+
+
+    def _bus_target(self, row):
+        values = self._row_values(row)
+        result = self._row_metadata(row).get('result', {})
+        # Prefer the server's executed path; never check UNC paths on the client.
+        paths = [step.get('target', '') for step in result.get('steps', [])
+                 if str(step.get('target', '')).startswith('\\\\')]
+        path = paths[0] if paths else ('' if values['kind']=='종료' else build_path_l3(values['proj'],values['lv2'],values['lv3']))
+        return {**values, 'row': row, 'path': path}
+
+
+    def _on_api_progress(self, job):
+        self._set_progress_status(f"API {job.get('status','')} / {job.get('job_id','')}",
+                                 self._get(self.current_row,self.COL_PROJ),self.done_jobs,self.total_jobs,running=True)
+
+
+    def _on_api_result(self, result):
+        row = self.current_row
+        meta = self._row_metadata(row)
+        result = dict(result)
+        meta['result'] = result
+        self._set_row_metadata(row,meta)
+        status = result.get('status')
+        label = {'preview':'DryRun', 'simulated':'모의완료 (BUS 미처리)',
+                 'succeeded':'API 성공', 'partially_succeeded':'부분 성공 (BUS 미처리)',
+                 'failed':'API 실패', 'cancelled':'취소됨'}.get(status,'알 수 없는 결과')
+        self.table.item(row,self.COL_STATUS).setText(label)
+        self._log(json.dumps(result,ensure_ascii=False,indent=2))
+        self.done_jobs += 1
+        stopped = self.stop_requested or result.get('client_stopped',False)
+        if (self.auto_complete_after_add and not meta.get('bus_done')
+                and can_complete_bus(result,meta.get('source'),stopped)):
+            # Session preparation pumps Qt events. Hold the queue before entering it.
+            self._waiting_for_bus = True
+            self._pending_after_add_row = row
+            if self._ensure_bus_session('API 성공 후 완료 처리') and not self.stop_requested and not self._closing:
+                self.table.item(row,self.COL_STATUS).setText('완료 처리중')
+                self.trigger_session_process.emit([self._bus_target(row)])
+            else:
+                self._waiting_for_bus = False
+                self._pending_after_add_row = None
+                self._log('API는 성공했습니다. BUS 세션 준비 후 완료 처리만 다시 실행하세요.')
+                QTimer.singleShot(0,self._start_next_job)
+
+
+    def _on_api_error(self, message):
+        self.table.item(self.current_row,self.COL_STATUS).setText('API 오류 (등록 결과 확인 필요)')
+        self._log(message)
+        self.done_jobs += 1
+
+
+    def _api_thread_finished(self):
+        self.api_worker = None
+        self.api_thread = None
+        if self._closing:
+            QTimer.singleShot(0,self.close)
+        elif not self._waiting_for_bus:
+            self._start_next_job()
+
 
 def _excepthook(etype, value, tb):
     try:
