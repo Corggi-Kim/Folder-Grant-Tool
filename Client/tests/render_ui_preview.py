@@ -17,6 +17,7 @@ def render():
     try:
         w,m,app = fixture.window,fixture.m,fixture.app
         w.api_config['base_url'] = 'http://192.168.1.10:8000'
+        w._on_counts_ready({'신규미완료':2,'진행-부여':3,'진행-제거':1,'종료-부여':1,'종료-제거':1})
         w.session.is_ready = lambda:True
         w._set_api_connection_state(True,dict(executor_mode='powershell'))
         started = (datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(seconds=522)).isoformat()
@@ -53,7 +54,7 @@ def render():
         if '--projects' in __import__('sys').argv:
             w.ensure_bus_session_async = lambda purpose,callback:None
             w.open_new_viewer()
-            w._newdlg.set_data(['프로젝트코드','프로젝트명'],[['26-012','표준 프로젝트'],['26-019','신규 연구']])
+            w._newdlg.set_data(['프로젝트코드','프로젝트명','신청자','요청일'],[['26-012','표준 프로젝트','홍길동','2026-10-22'],['26-019','신규 연구','김연구','2026-10-22']])
             app.processEvents()
             w.grab().save(str(output/'client-projects-v1.1.0.png'))
         print(json.dumps(dict(size=[w.width(),w.height()],table=[w.table.width(),w.table.height()],

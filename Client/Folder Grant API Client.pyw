@@ -7,7 +7,7 @@
 #            └─ fgt.ico
 #
 # 2) 실행 시 생성/사용 경로 (코드에서 자동 생성)
-#    - C:\FGT\Log       : 실행 로그(access_YYYYMMDD.log)
+#    - C:\FGT\Log       : 실행 로그(access.log)
 #    - C:\FGT\conf      : 설정(login.json, theme 등)
 #    - C:\FGT\ef         : 엑셀파일 다운로드
 #    - C:\FGT\debug   : 디버그 파일
@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem, QAbstractItemView, QVBoxLayout, QWidget, QTextEdit, QHBoxLayout,
     QLabel, QHeaderView, QCheckBox, QMenu, QToolButton, QMessageBox, QStyleOptionButton,
     QStyle, QDialog, QLineEdit, QComboBox, QDialogButtonBox, QFormLayout, QStatusBar,
-    QSpinBox, QProgressBar, QAbstractButton, QTabBar, QStackedWidget, QAction, QStyledItemDelegate, QStyleOptionViewItem
+    QScrollArea, QSpinBox, QProgressBar, QAbstractButton, QTabBar, QStackedWidget, QAction, QStyledItemDelegate, QStyleOptionViewItem, QStyleOptionTab
 )
 from PyQt5.QtGui import QFont, QGuiApplication, QKeySequence, QPainter, QTextOption, QTextCursor, QPixmap, QIcon, QColor, QPen, QPainterPath
 from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QTimer, QPoint, QSize
@@ -98,7 +98,7 @@ HELP_TEXT = r"""[Folder Grant API Client 사용 안내]
 9) 중지: 새 작업 등록을 멈추고 실행 Job에 취소를 요청합니다.
    이미 실행 중인 서버 PowerShell 단계는 즉시 종료되지 않을 수 있습니다.
 10) BUS 조회 행을 편집하면 수동 요청으로 전환합니다. 기존 성공 결과는 무효화됩니다.
-11) 로그: C:\FGT\Log\access_YYYYMMDD.log, 다운로드: C:\FGT\ef
+11) 로그: C:\FGT\Log\access.log, 다운로드: C:\FGT\ef
 12) 테마는 상단 아이콘/스위치로 전환합니다. 설정은 톱니바퀴 메뉴에 있습니다.
 13) 이름·부서·Role 편집은 톱니바퀴의 상세 열 표시를 사용합니다. 상세 절차는 Client/README.md를 확인하세요.
 """
@@ -2328,6 +2328,44 @@ class CheckBoxHeader(QHeaderView):
         super().mousePressEvent(e)
 
 
+class WorkspaceTabBar(QTabBar):
+    """Keep notification badges attached to the upper right of each label."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.count_badges = []
+
+    def add_count_badges(self):
+        for index in range(self.count()):
+            badge = QLabel('0',self); badge.setObjectName('requestCountBadge')
+            badge.setAlignment(Qt.AlignCenter); badge.setFixedSize(26,18)
+            badge.setAttribute(Qt.WA_TransparentForMouseEvents)
+            self.count_badges.append(badge)
+        self._position_badges()
+
+    def tabSizeHint(self,index):
+        size = super().tabSizeHint(index)
+        size.setWidth(size.width()+24)
+        return size
+
+    def tabLayoutChange(self):
+        super().tabLayoutChange()
+        self._position_badges()
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        self._position_badges()
+
+    def _position_badges(self):
+        for index,badge in enumerate(getattr(self,'count_badges',[])):
+            option = QStyleOptionTab(); self.initStyleOption(option,index)
+            rect = self.style().subElementRect(QStyle.SE_TabBarTabText,option,self)
+            width = option.fontMetrics.horizontalAdvance(self.tabText(index))
+            x = rect.center().x()+width//2+4
+            y = rect.center().y()-option.fontMetrics.height()//2-10
+            badge.move(min(x,self.tabRect(index).right()-badge.width()-3),max(3,y))
+            badge.raise_()
+
+
 class CopyTable(QTableWidget):
     def keyPressEvent(self, event):
         if event.matches(QKeySequence.Copy):
@@ -2619,7 +2657,32 @@ class NewItemsViewer(QDialog):
         self.btn_manual = QPushButton('수동 추가')
         top.addWidget(self.btn_manual); top.addWidget(self.btn_refresh)
         self.btn_manual.clicked.connect(self._on_manual_clicked)
-        lay.addWidget(self.toolbar); lay.addWidget(self.tbl,1)
+        lay.addWidget(self.toolbar)
+        content = QHBoxLayout(); content.setSpacing(10)
+        content.setContentsMargins(0,0,0,0)
+        content.addWidget(self.tbl,1)
+        self.detail_panel = QWidget(); self.detail_panel.setObjectName('detailPanel')
+        self.detail_panel.setFixedWidth(258)
+        detail = QVBoxLayout(self.detail_panel); detail.setContentsMargins(17,14,17,14)
+        title = QLabel('선택 요청 상세'); title.setObjectName('sectionTitle')
+        detail.addWidget(title)
+        fields = QWidget(); fields.setObjectName('projectDetailFields')
+        self.detail_form = QFormLayout(fields); self.detail_form.setVerticalSpacing(9)
+        self.detail_form.setContentsMargins(0,0,0,0)
+        self.detail_scroll = QScrollArea(); self.detail_scroll.setObjectName('projectDetailScroll'); self.detail_scroll.setWidgetResizable(True)
+        self.detail_scroll.setFrameShape(QScrollArea.NoFrame)
+        self.detail_scroll.setWidget(fields)
+        detail.addWidget(self.detail_scroll,1)
+        self.detail_result = QLabel('요청을 선택하세요')
+        self.detail_result.setObjectName('detailBanner'); self.detail_result.setWordWrap(True)
+        self.detail_result.setContentsMargins(12,10,12,10)
+        detail.addWidget(self.detail_result)
+        self.detail_values = {}
+        content.addWidget(self.detail_panel)
+        lay.addLayout(content,1)
+        self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tbl.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tbl.itemSelectionChanged.connect(self._refresh_project_detail)
         self.tbl.verticalHeader().setDefaultSectionSize(47)
         self.tbl.horizontalHeader().setFixedHeight(43)
         self.tbl.setAlternatingRowColors(False)
@@ -2695,6 +2758,9 @@ class NewItemsViewer(QDialog):
         self.tbl.setItem(row,name_col,QTableWidgetItem(name))
         self.tbl.item(row,self._hidx['프로젝트코드']).setData(Qt.UserRole,
             dict(source='test-client',request_id=new_client_request_id(),bus_done=False))
+        self.tbl.setItem(row,self._status_col,QTableWidgetItem('실행 대기'))
+        self.tbl.setCurrentCell(row,self._hidx['프로젝트코드'])
+        self._refresh_project_detail()
         self.status_lbl.setText('수동 요청을 추가했습니다. Dry Run 또는 API 생성을 실행하세요.')
 
 
@@ -2790,6 +2856,56 @@ class NewItemsViewer(QDialog):
                 except ValueError:
                     request_id = new_client_request_id()
                 item.setData(Qt.UserRole,dict(source='bus',request_id=request_id,bus_done=False))
+        self._configure_project_summary()
+
+    def _configure_project_summary(self):
+        self._status_col = self.tbl.columnCount()
+        self.tbl.setColumnCount(self._status_col+1)
+        self.tbl.setHorizontalHeaderItem(self._status_col,QTableWidgetItem('상태'))
+        visible = {self._hidx.get('프로젝트코드'),
+                   self._hidx.get('프로젝트명',self._hidx.get('과제명',self._hidx.get('제목')))}
+        for column in range(1,self._status_col):
+            self.tbl.setColumnHidden(column,column not in visible)
+            if column in visible:
+                self.tbl.horizontalHeader().setSectionResizeMode(column,QHeaderView.Stretch)
+        self.tbl.horizontalHeader().setSectionResizeMode(self._status_col,QHeaderView.Interactive)
+        self.tbl.setColumnWidth(self._status_col,130)
+        for row in range(self.tbl.rowCount()):
+            self.tbl.setItem(row,self._status_col,QTableWidgetItem('실행 대기'))
+        if self.tbl.rowCount():
+            self.tbl.setCurrentCell(0,self._hidx.get('프로젝트코드',1))
+        self._refresh_project_detail()
+
+    @staticmethod
+    def _project_result_label(result):
+        if result.get('bus_done'):
+            return 'BUS 완료'
+        return {'preview':'미리보기','succeeded':'서버 성공','failed':'실패',
+                'cancelled':'중지됨','running':'실행 중','queued':'실행 대기'}.get(result.get('status'),'실행 대기')
+
+    def _refresh_project_detail(self):
+        while self.detail_form.rowCount():
+            self.detail_form.removeRow(0)
+        self.detail_values = {}
+        row = self.tbl.currentRow()
+        if row < 0:
+            self.detail_result.setText('요청을 선택하세요')
+            return
+        for name,column in getattr(self,'_hidx',{}).items():
+            item = self.tbl.item(row,column)
+            value = QLabel(item.text() if item and item.text() else '—')
+            value.setWordWrap(True); value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            label = QLabel(name); label.setObjectName('mutedLabel'); label.setWordWrap(True)
+            self.detail_form.addRow(label,value)
+            self.detail_values[name] = value
+        code_item = self.tbl.item(row,self._hidx.get('프로젝트코드',-1))
+        meta = dict(code_item.data(Qt.UserRole) or {}) if code_item else {}
+        result = meta.get('result') or {}
+        lines = [self._project_result_label(result)]
+        for key,label in [('job_id','작업 ID'),('error_code','오류'),('message','메시지')]:
+            if result.get(key):
+                lines.append(f'{label}: {result[key]}')
+        self.detail_result.setText('\n'.join(lines))
 
     def _toggle_all_rows(self, checked: bool):
         t = self.tbl
@@ -2887,7 +3003,10 @@ class NewItemsViewer(QDialog):
             meta.update(result=result,bus_done=result.get('bus_done',False))
             item.setData(Qt.UserRole,meta)
             item.setToolTip(json.dumps(result,ensure_ascii=False,indent=2))
-        self.host._log('프로젝트 결과: '+json.dumps(result,ensure_ascii=False,indent=2))
+        self.tbl.setItem(row,self._status_col,QTableWidgetItem(self._project_result_label(result)))
+        self._refresh_project_detail()
+        self.host._log('프로젝트 결과: '+json.dumps(result,ensure_ascii=False,indent=2),
+                       summary=self.host._api_log_summary(result,f'프로젝트 {item.text() if item else row+1}'))
 
 
     def _project_thread_finished(self):
@@ -3632,6 +3751,9 @@ class AccessManager(QMainWindow):
         QTabBar::tab:selected {{color:{t['accent']};border-bottom-color:{t['accent']};}}
         QTabBar::tab:disabled {{color:{t['disabled']};}}
         QWidget#requestToolbar {{background:{t['bg']};border:0;}}
+        QWidget#projectDetailFields, QScrollArea#projectDetailScroll {{background:{t['panel']};}}
+        QWidget#projectDetailFields QLabel {{background:transparent;}}
+        QLabel#requestCountBadge {{background:#ef3340;color:white;border:0;border-radius:5px;padding:0;font-size:11px;font-weight:600;}}
         QLabel#sectionTitle {{font-size:16px;font-weight:700;}}
         QTableWidget {{background:{t['panel']};alternate-background-color:{t['bg']};border:1px solid {t['border']};border-radius:5px;gridline-color:{t['grid']};selection-background-color:{t['select']};selection-color:{t['text']};}}
         QTableWidget QWidget {{background:transparent;}}
@@ -3822,9 +3944,6 @@ class AccessManager(QMainWindow):
         self.btn_theme.clicked.connect(self._toggle_theme)
         self.header_bar.addWidget(self.btn_theme)
         self.btn_notif = QToolButton(self); self.btn_notif.hide()
-        self.badge_notif = BadgeToolButton(self.settings_button,self)
-        self.badge_notif.setBadgeSize(10)
-        self.badge_notif.setOffset(0,0)
         self._title_widget = self.brand_title
         main.addWidget(header)
 
@@ -3840,7 +3959,7 @@ class AccessManager(QMainWindow):
         connection.addStretch(); connection.addWidget(self.execution_mode_label)
         main.addWidget(self.connection_bar)
 
-        self.tabs = QTabBar(); self.tabs.setObjectName('workspaceTabs')
+        self.tabs = WorkspaceTabBar(); self.tabs.setObjectName('workspaceTabs')
         self.tabs.setExpanding(False)
         self.tabs.setElideMode(Qt.ElideNone)
         self.tabs.addTab('권한 요청'); self.tabs.addTab('신규 프로젝트')
@@ -3848,6 +3967,9 @@ class AccessManager(QMainWindow):
         tab_layout = QHBoxLayout(tab_row)
         tab_layout.setContentsMargins(18,0,18,0); tab_layout.setSpacing(0)
         tab_layout.addWidget(self.tabs)
+        tab_layout.addStretch()
+        self.tabs.add_count_badges()
+        self.tab_count_badges = self.tabs.count_badges
         main.addWidget(tab_row)
         self.workspaces = QStackedWidget()
         self.request_page = QWidget()
@@ -4110,9 +4232,14 @@ class AccessManager(QMainWindow):
             "종료-제거": _toi(counts.get("종료-제거", 0)),
         }
 
-        total = sum(self._notif_counts.values())
+        self._refresh_request_count_badge()
 
-        QTimer.singleShot(0, lambda t=total: self.badge_notif.setBadge(t))
+    def _refresh_request_count_badge(self):
+        counts = getattr(self,'_notif_counts',{})
+        totals = [sum(counts.get(key,0) for key in ('진행-부여','진행-제거','종료-부여','종료-제거')),
+                  counts.get('신규미완료',0)]
+        for badge,total in zip(self.tab_count_badges,totals):
+            badge.setText('99+' if total>99 else str(total))
 
     def _on_watcher_ready(self, ok: bool, msg: str):
         self._refresh_connection_strip()
@@ -4386,7 +4513,8 @@ class AccessManager(QMainWindow):
         meta = self._row_metadata(row)
         meta['result'] = dict(result)
         self._set_row_metadata(row,meta)
-        self._log(f'{row+1}행 서버 재조회: '+json.dumps(result,ensure_ascii=False))
+        self._log(f'{row+1}행 서버 재조회: '+json.dumps(result,ensure_ascii=False),
+                  summary=self._api_log_summary(result,f'{row+1}행 서버 재조회'))
         if can_complete_bus(result,meta.get('source'),self.stop_requested or self._closing):
             self._completion_targets.append(self._bus_target(row))
             self.table.item(row,self.COL_STATUS).setText('서버 성공 확인 (BUS 완료 대기)')
@@ -4407,7 +4535,8 @@ class AccessManager(QMainWindow):
         meta['result'] = {}
         self._set_row_metadata(row,meta)
         self.table.item(row,self.COL_STATUS).setText('BUS 완료 보류: 서버 재조회 실패')
-        self._log(f'{row+1}행: {message}. 이전 성공 결과로 BUS 완료를 진행하지 않습니다.')
+        self._log(f'{row+1}행: {message}. 이전 성공 결과로 BUS 완료를 진행하지 않습니다.',
+                  summary=f'{row+1}행: 서버 재조회 실패 · BUS 완료 보류 (상세 내용은 로그 파일 확인)')
 
     def _completion_refresh_finished(self):
         self.api_worker = None
@@ -4723,7 +4852,8 @@ class AccessManager(QMainWindow):
         self.current_seq = self.done_jobs+1
         self.current_mode = 'add' if payload['operation']=='grant' else 'remove'
         self.table.item(row,self.COL_STATUS).setText('Preview 조회 중' if dry else 'API 실행중')
-        self._log(f"API {'Preview' if dry else 'Job'} 요청: {payload['request_id']}")
+        self._log(f"API {'Preview' if dry else 'Job'} 요청: {payload['request_id']}",
+                  summary=f"{row+1}행 · 프로젝트 {self._get(row,self.COL_PROJ)}: {'미리보기' if dry else '권한 작업'} 요청")
         thread = QThread(self)
         worker = ApiJobWorker(self._api_client(),'access',payload,dry)
         self.api_thread,self.api_worker = thread,worker
@@ -4786,30 +4916,41 @@ class AccessManager(QMainWindow):
         else:
             self._log(f"수동 입력 추가: 구분={kind}, 요청={reqtype}, 사번={user}, 프로젝트={proj}, L2={lv2}, L3={lv3}, ROLE={'없음' if not role else role}")
 
-    def _log(self, message: str, seq: int = None, dry: bool = False):
+    @staticmethod
+    def _api_log_summary(result,context):
+        status = result.get('status','unknown')
+        label = {'preview':'미리보기 완료','simulated':'모의 실행 완료','succeeded':'성공',
+                 'partially_succeeded':'부분 성공','failed':'실패','cancelled':'중지됨',
+                 'running':'실행 중','queued':'실행 대기'}.get(status,'결과 확인 필요')
+        if result.get('bus_done'):
+            label += ' · BUS 완료'
+        error = result.get('error_code')
+        if error:
+            label += ' · '+('서버 시간 초과' if error=='POWERSHELL_TIMEOUT' else str(error))
+        return f'{context}: {label}'
+
+    def _log(self, message: str, seq: int = None, dry: bool = False, *, summary: str = None):
         api_key = getattr(self,'api_config',{}).get('api_key','')
-        if api_key:
-            message = message.replace(api_key,'[API Key]')
-        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        dry_str = " Dry" if dry else ""
-        tag = f"{dry_str} #{seq}" if seq is not None else ""
-
-        norm = (message or "").replace("\r", "\n").replace("\t", "    ").rstrip()
-        block = f"[{ts}{tag}]\n{norm}\n"
-
-        cursor = self.log.textCursor()
-        cursor.movePosition(QTextCursor.End)
+        def sanitize(value):
+            value = str(value or '')
+            return value.replace(api_key,'[API Key]') if api_key else value
+        detailed = sanitize(message)
+        visible = sanitize(summary if summary is not None else message)
+        ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        dry_str = ' Dry' if dry else ''
+        tag = f'{dry_str} #{seq}' if seq is not None else ''
+        norm = detailed.replace('\r','\n').replace('\t','    ').rstrip()
+        block = f'[{ts}{tag}]\n{norm}\n'
+        # The file keeps the full record; the GUI receives its own short message.
+        with open(os.path.join(LOG_DIR,'access.log'),'a',encoding='utf-8') as handle:
+            handle.write(block)
+        visible = ' '.join(visible.split())
+        cursor = self.log.textCursor(); cursor.movePosition(QTextCursor.End)
         self.log.setTextCursor(cursor)
-
         if self.log.toPlainText():
-            self.log.insertPlainText("\n")
-
-        self.log.insertPlainText(block)
+            self.log.insertPlainText('\n')
+        self.log.insertPlainText(f'[{ts}{tag}] {visible}')
         self.log.ensureCursorVisible()
-
-        fn = os.path.join(LOG_DIR, f"access_{datetime.date.today().strftime('%Y%m%d')}.log")
-        with open(fn, "a", encoding="utf-8") as f:
-            f.write(block)
 
     def choose_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "승인 엑셀 선택", "", "Excel Files (*.xlsx *.xls)")
@@ -5178,7 +5319,8 @@ class AccessManager(QMainWindow):
                  'succeeded':'API 성공', 'partially_succeeded':'부분 성공 (BUS 미처리)',
                  'failed':'API 실패', 'cancelled':'취소됨'}.get(status,'알 수 없는 결과')
         self.table.item(row,self.COL_STATUS).setText(label)
-        self._log(json.dumps(result,ensure_ascii=False,indent=2))
+        self._log(json.dumps(result,ensure_ascii=False,indent=2),
+                  summary=self._api_log_summary(result,f'{row+1}행 · 프로젝트 {self._get(row,self.COL_PROJ)}'))
         if result.get('error_code') == 'POWERSHELL_TIMEOUT':
             self.table.item(row,self.COL_STATUS).setText('서버 시간 초과 (BUS 완료 보류)')
             self._log('서버 PowerShell 실행 제한을 초과하여 작업이 종료됐습니다. '
@@ -5204,7 +5346,7 @@ class AccessManager(QMainWindow):
     def _on_api_error(self, message):
         self._set_api_connection_state(False)
         self.table.item(self.current_row,self.COL_STATUS).setText('API 오류 (등록 결과 확인 필요)')
-        self._log(message)
+        self._log(message,summary='API 요청 오류 · 상세 내용은 로그 파일을 확인하세요.')
         self.done_jobs += 1
 
 
@@ -5242,6 +5384,7 @@ class AccessManager(QMainWindow):
 
 
     def _switch_workspace(self,index):
+        self._refresh_request_count_badge()
         self.workspaces.setCurrentIndex(index)
         self.actions_bar.setVisible(index==0)
         self.summary_label.setVisible(index==0)

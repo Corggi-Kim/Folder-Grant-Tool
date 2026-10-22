@@ -212,3 +212,72 @@ class DesignTests(unittest.TestCase):
             style = self.window.styleSheet().split('QHeaderView::section {',1)[1].split('}',1)[0]
             self.assertNotIn('border-right:1px',style)
             self.assertIn('border-bottom:1px',style)
+
+    def test_project_summary_keeps_full_data_in_selected_request_detail(self):
+        w = self.window
+        v = self.m.NewItemsViewer(w)
+        v.set_data(['프로젝트코드','프로젝트명','신청자','요청일'],[['26-012','연구 프로젝트','홍길동','2026-10-22']])
+        self.assertTrue(v.tbl.isColumnHidden(v._hidx['신청자']))
+        self.assertFalse(v.tbl.isColumnHidden(v._hidx['프로젝트명']))
+        v.tbl.setCurrentCell(0,v._hidx['프로젝트코드'])
+        self.assertIn('홍길동',v.detail_values['신청자'].text())
+        self.assertIn('26-012',v.detail_values['프로젝트코드'].text())
+        self.assertEqual(v.tbl.item(0,v._status_col).text(),'실행 대기')
+        v._on_project_result(0,dict(status='succeeded',executor_mode='powershell',bus_done=True))
+        self.assertEqual(v.tbl.item(0,v._status_col).text(),'BUS 완료')
+        self.assertIn('BUS 완료',v.detail_result.text())
+        v._manual_add('26-019','수동 연구')
+        self.assertEqual(v.detail_values['프로젝트코드'].text(),'26-019')
+
+    def test_request_count_badge_is_scoped_and_settings_detail_is_preserved(self):
+        w = self.window
+        w._on_counts_ready({'신규미완료':7,'진행-부여':2,'진행-제거':3,'종료-부여':4,'종료-제거':1})
+        self.assertEqual(w.tab_count_badges[0].text(),'10')
+        self.assertFalse(hasattr(w,'badge_notif'))
+        self.assertIn('BUS 요청 알림',[action.text() for action in w.settings_button.menu().actions()])
+        w.ensure_bus_session_async = lambda purpose,callback:None
+        w.tabs.setCurrentIndex(1)
+        self.assertEqual(w.tab_count_badges[1].text(),'7')
+        w._on_counts_ready({'신규미완료':9})
+        self.assertEqual(w.tab_count_badges[1].text(),'9')
+        w.tabs.setCurrentIndex(0)
+        self.assertEqual(w.tab_count_badges[0].text(),'0')
+
+    def test_count_badges_are_attached_to_each_tab(self):
+        w = self.window
+        self.show()
+        for index,badge in enumerate(w.tab_count_badges):
+            self.assertIs(badge.parent(),w.tabs)
+            point = badge.mapTo(w.tabs,self.m.QPoint(0,0))
+            self.assertTrue(w.tabs.tabRect(index).contains(point))
+            self.assertLess(point.y(),w.tabs.tabRect(index).center().y())
+
+    def test_screen_log_is_summary_and_file_log_keeps_detail(self):
+        from pathlib import Path
+        w = self.window
+        w.log.clear()
+        detail = json.dumps({'steps':[{'target':'detail-only-target'}],'api_key':'test'})
+        w._log(detail,summary='프로젝트 26-012: 권한 적용 성공')
+        self.assertIn('권한 적용 성공',w.log.toPlainText())
+        self.assertNotIn('detail-only-target',w.log.toPlainText())
+        path = Path(self.fixture.tmp.name)/'access.log'
+        saved = path.read_text(encoding='utf-8')
+        self.assertIn('detail-only-target',saved)
+        self.assertNotIn('"test"',saved)
+        w._clear_log()
+        w._log('두 번째 작업')
+        self.assertIn('detail-only-target',path.read_text(encoding='utf-8'))
+        self.assertIn('두 번째 작업',path.read_text(encoding='utf-8'))
+        self.assertEqual(list(Path(self.fixture.tmp.name).glob('access_*.log')),[])
+
+    def test_api_result_logs_a_readable_summary_without_raw_schema(self):
+        w = self.window
+        row = self.fixture.row()
+        w.current_row = row
+        w.auto_complete_after_add = False
+        w.log.clear()
+        w._on_api_result({'status':'failed','error_code':'POWERSHELL_TIMEOUT','steps':[{'target':'raw-only-target'}]})
+        text = w.log.toPlainText()
+        self.assertNotIn('raw-only-target',text)
+        self.assertNotIn('"status"',text)
+        self.assertIn('시간 초과',text)
