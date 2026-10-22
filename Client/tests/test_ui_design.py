@@ -228,3 +228,17 @@ class DesignTests(unittest.TestCase):
         self.assertIn('BUS 완료',v.detail_result.text())
         v._manual_add('26-019','수동 연구')
         self.assertEqual(v.detail_values['프로젝트코드'].text(),'26-019')
+
+    def test_request_count_badge_is_scoped_and_settings_detail_is_preserved(self):
+        w = self.window
+        w._on_counts_ready({'신규미완료':7,'진행-부여':2,'진행-제거':3,'종료-부여':4,'종료-제거':1})
+        self.assertEqual(w.request_count_badge.text(),'10')
+        self.assertFalse(hasattr(w,'badge_notif'))
+        self.assertIn('BUS 요청 알림',[action.text() for action in w.settings_button.menu().actions()])
+        w.ensure_bus_session_async = lambda purpose,callback:None
+        w.tabs.setCurrentIndex(1)
+        self.assertEqual(w.request_count_badge.text(),'7')
+        w._on_counts_ready({'신규미완료':9})
+        self.assertEqual(w.request_count_badge.text(),'9')
+        w.tabs.setCurrentIndex(0)
+        self.assertEqual(w.request_count_badge.text(),'0')
