@@ -53,7 +53,7 @@ def render():
         if '--projects' in __import__('sys').argv:
             w.ensure_bus_session_async = lambda purpose,callback:None
             w.open_new_viewer()
-            w._newdlg.set_data(['프로젝트코드','프로젝트명'],[['26-012','표준 프로젝트'],['26-019','신규 연구']])
+            w._newdlg.set_data(['프로젝트코드','프로젝트명','신청자','요청일'],[['26-012','표준 프로젝트','홍길동','2026-10-22'],['26-019','신규 연구','김연구','2026-10-22']])
             app.processEvents()
             w.grab().save(str(output/'client-projects-v1.1.0.png'))
         print(json.dumps(dict(size=[w.width(),w.height()],table=[w.table.width(),w.table.height()],

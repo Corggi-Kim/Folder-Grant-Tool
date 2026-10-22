@@ -212,3 +212,19 @@ class DesignTests(unittest.TestCase):
             style = self.window.styleSheet().split('QHeaderView::section {',1)[1].split('}',1)[0]
             self.assertNotIn('border-right:1px',style)
             self.assertIn('border-bottom:1px',style)
+
+    def test_project_summary_keeps_full_data_in_selected_request_detail(self):
+        w = self.window
+        v = self.m.NewItemsViewer(w)
+        v.set_data(['프로젝트코드','프로젝트명','신청자','요청일'],[['26-012','연구 프로젝트','홍길동','2026-10-22']])
+        self.assertTrue(v.tbl.isColumnHidden(v._hidx['신청자']))
+        self.assertFalse(v.tbl.isColumnHidden(v._hidx['프로젝트명']))
+        v.tbl.setCurrentCell(0,v._hidx['프로젝트코드'])
+        self.assertIn('홍길동',v.detail_values['신청자'].text())
+        self.assertIn('26-012',v.detail_values['프로젝트코드'].text())
+        self.assertEqual(v.tbl.item(0,v._status_col).text(),'실행 대기')
+        v._on_project_result(0,dict(status='succeeded',executor_mode='powershell',bus_done=True))
+        self.assertEqual(v.tbl.item(0,v._status_col).text(),'BUS 완료')
+        self.assertIn('BUS 완료',v.detail_result.text())
+        v._manual_add('26-019','수동 연구')
+        self.assertEqual(v.detail_values['프로젝트코드'].text(),'26-019')

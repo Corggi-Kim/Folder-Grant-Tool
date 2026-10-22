@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem, QAbstractItemView, QVBoxLayout, QWidget, QTextEdit, QHBoxLayout,
     QLabel, QHeaderView, QCheckBox, QMenu, QToolButton, QMessageBox, QStyleOptionButton,
     QStyle, QDialog, QLineEdit, QComboBox, QDialogButtonBox, QFormLayout, QStatusBar,
-    QSpinBox, QProgressBar, QAbstractButton, QTabBar, QStackedWidget, QAction, QStyledItemDelegate, QStyleOptionViewItem
+    QScrollArea, QSpinBox, QProgressBar, QAbstractButton, QTabBar, QStackedWidget, QAction, QStyledItemDelegate, QStyleOptionViewItem
 )
 from PyQt5.QtGui import QFont, QGuiApplication, QKeySequence, QPainter, QTextOption, QTextCursor, QPixmap, QIcon, QColor, QPen, QPainterPath
 from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QTimer, QPoint, QSize
@@ -2619,7 +2619,32 @@ class NewItemsViewer(QDialog):
         self.btn_manual = QPushButton('수동 추가')
         top.addWidget(self.btn_manual); top.addWidget(self.btn_refresh)
         self.btn_manual.clicked.connect(self._on_manual_clicked)
-        lay.addWidget(self.toolbar); lay.addWidget(self.tbl,1)
+        lay.addWidget(self.toolbar)
+        content = QHBoxLayout(); content.setSpacing(10)
+        content.setContentsMargins(0,0,0,0)
+        content.addWidget(self.tbl,1)
+        self.detail_panel = QWidget(); self.detail_panel.setObjectName('detailPanel')
+        self.detail_panel.setFixedWidth(258)
+        detail = QVBoxLayout(self.detail_panel); detail.setContentsMargins(17,14,17,14)
+        title = QLabel('선택 요청 상세'); title.setObjectName('sectionTitle')
+        detail.addWidget(title)
+        fields = QWidget(); fields.setObjectName('projectDetailFields')
+        self.detail_form = QFormLayout(fields); self.detail_form.setVerticalSpacing(9)
+        self.detail_form.setContentsMargins(0,0,0,0)
+        self.detail_scroll = QScrollArea(); self.detail_scroll.setObjectName('projectDetailScroll'); self.detail_scroll.setWidgetResizable(True)
+        self.detail_scroll.setFrameShape(QScrollArea.NoFrame)
+        self.detail_scroll.setWidget(fields)
+        detail.addWidget(self.detail_scroll,1)
+        self.detail_result = QLabel('요청을 선택하세요')
+        self.detail_result.setObjectName('detailBanner'); self.detail_result.setWordWrap(True)
+        self.detail_result.setContentsMargins(12,10,12,10)
+        detail.addWidget(self.detail_result)
+        self.detail_values = {}
+        content.addWidget(self.detail_panel)
+        lay.addLayout(content,1)
+        self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tbl.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tbl.itemSelectionChanged.connect(self._refresh_project_detail)
         self.tbl.verticalHeader().setDefaultSectionSize(47)
         self.tbl.horizontalHeader().setFixedHeight(43)
         self.tbl.setAlternatingRowColors(False)
@@ -2695,6 +2720,9 @@ class NewItemsViewer(QDialog):
         self.tbl.setItem(row,name_col,QTableWidgetItem(name))
         self.tbl.item(row,self._hidx['프로젝트코드']).setData(Qt.UserRole,
             dict(source='test-client',request_id=new_client_request_id(),bus_done=False))
+        self.tbl.setItem(row,self._status_col,QTableWidgetItem('실행 대기'))
+        self.tbl.setCurrentCell(row,self._hidx['프로젝트코드'])
+        self._refresh_project_detail()
         self.status_lbl.setText('수동 요청을 추가했습니다. Dry Run 또는 API 생성을 실행하세요.')
 
 
@@ -2790,6 +2818,56 @@ class NewItemsViewer(QDialog):
                 except ValueError:
                     request_id = new_client_request_id()
                 item.setData(Qt.UserRole,dict(source='bus',request_id=request_id,bus_done=False))
+        self._configure_project_summary()
+
+    def _configure_project_summary(self):
+        self._status_col = self.tbl.columnCount()
+        self.tbl.setColumnCount(self._status_col+1)
+        self.tbl.setHorizontalHeaderItem(self._status_col,QTableWidgetItem('상태'))
+        visible = {self._hidx.get('프로젝트코드'),
+                   self._hidx.get('프로젝트명',self._hidx.get('과제명',self._hidx.get('제목')))}
+        for column in range(1,self._status_col):
+            self.tbl.setColumnHidden(column,column not in visible)
+            if column in visible:
+                self.tbl.horizontalHeader().setSectionResizeMode(column,QHeaderView.Stretch)
+        self.tbl.horizontalHeader().setSectionResizeMode(self._status_col,QHeaderView.Interactive)
+        self.tbl.setColumnWidth(self._status_col,130)
+        for row in range(self.tbl.rowCount()):
+            self.tbl.setItem(row,self._status_col,QTableWidgetItem('실행 대기'))
+        if self.tbl.rowCount():
+            self.tbl.setCurrentCell(0,self._hidx.get('프로젝트코드',1))
+        self._refresh_project_detail()
+
+    @staticmethod
+    def _project_result_label(result):
+        if result.get('bus_done'):
+            return 'BUS 완료'
+        return {'preview':'미리보기','succeeded':'서버 성공','failed':'실패',
+                'cancelled':'중지됨','running':'실행 중','queued':'실행 대기'}.get(result.get('status'),'실행 대기')
+
+    def _refresh_project_detail(self):
+        while self.detail_form.rowCount():
+            self.detail_form.removeRow(0)
+        self.detail_values = {}
+        row = self.tbl.currentRow()
+        if row < 0:
+            self.detail_result.setText('요청을 선택하세요')
+            return
+        for name,column in getattr(self,'_hidx',{}).items():
+            item = self.tbl.item(row,column)
+            value = QLabel(item.text() if item and item.text() else '—')
+            value.setWordWrap(True); value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            label = QLabel(name); label.setObjectName('mutedLabel'); label.setWordWrap(True)
+            self.detail_form.addRow(label,value)
+            self.detail_values[name] = value
+        code_item = self.tbl.item(row,self._hidx.get('프로젝트코드',-1))
+        meta = dict(code_item.data(Qt.UserRole) or {}) if code_item else {}
+        result = meta.get('result') or {}
+        lines = [self._project_result_label(result)]
+        for key,label in [('job_id','작업 ID'),('error_code','오류'),('message','메시지')]:
+            if result.get(key):
+                lines.append(f'{label}: {result[key]}')
+        self.detail_result.setText('\n'.join(lines))
 
     def _toggle_all_rows(self, checked: bool):
         t = self.tbl
@@ -2887,6 +2965,8 @@ class NewItemsViewer(QDialog):
             meta.update(result=result,bus_done=result.get('bus_done',False))
             item.setData(Qt.UserRole,meta)
             item.setToolTip(json.dumps(result,ensure_ascii=False,indent=2))
+        self.tbl.setItem(row,self._status_col,QTableWidgetItem(self._project_result_label(result)))
+        self._refresh_project_detail()
         self.host._log('프로젝트 결과: '+json.dumps(result,ensure_ascii=False,indent=2))
 
 
@@ -3632,6 +3712,8 @@ class AccessManager(QMainWindow):
         QTabBar::tab:selected {{color:{t['accent']};border-bottom-color:{t['accent']};}}
         QTabBar::tab:disabled {{color:{t['disabled']};}}
         QWidget#requestToolbar {{background:{t['bg']};border:0;}}
+        QWidget#projectDetailFields, QScrollArea#projectDetailScroll {{background:{t['panel']};}}
+        QWidget#projectDetailFields QLabel {{background:transparent;}}
         QLabel#sectionTitle {{font-size:16px;font-weight:700;}}
         QTableWidget {{background:{t['panel']};alternate-background-color:{t['bg']};border:1px solid {t['border']};border-radius:5px;gridline-color:{t['grid']};selection-background-color:{t['select']};selection-color:{t['text']};}}
         QTableWidget QWidget {{background:transparent;}}
