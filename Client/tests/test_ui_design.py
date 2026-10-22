@@ -22,8 +22,11 @@ class DesignTests(unittest.TestCase):
     def test_version_and_build_are_visible_in_main_header(self):
         self.assertEqual(self.m.APP_VERSION,'1.1.0')
         self.assertEqual(self.m.APP_BUILD,'2026-10-22')
-        self.assertIn('1.1.0',self.window.version_badge.text())
-        self.assertIn('2026-10-22',self.window.build_label.text())
+        self.assertEqual(self.window.release_label.text(),'V1.1.0 Build:20261022')
+        self.show()
+        w = self.window
+        self.assertGreater(w.release_label.mapTo(w,self.m.QPoint(0,0)).y(),w.btn_stop.mapTo(w,self.m.QPoint(0,0)).y()+w.btn_stop.height())
+        self.assertEqual(w.release_label.alignment(),self.m.Qt.AlignRight|self.m.Qt.AlignVCenter)
 
     def test_approved_layout_has_right_inspector_and_bottom_actions(self):
         self.show()
@@ -98,7 +101,7 @@ class DesignTests(unittest.TestCase):
         self.assertFalse(w._newdlg.isWindow())
         w.apply_theme('dark')
         self.assertEqual(w._newdlg.styleSheet(),'')
-        w._newdlg.btn_close.click()
+        w.tabs.setCurrentIndex(0)
         self.assertEqual(w.tabs.currentIndex(),0)
         self.assertIsNotNone(w._newdlg)
 
@@ -131,7 +134,7 @@ class DesignTests(unittest.TestCase):
     def test_theme_switch_persists_choice_in_both_directions(self):
         w = self.window
         for mode in ('dark','light'):
-            w.theme_switch.setChecked(mode=='dark')
+            w._toggle_theme()
             self.assertEqual(w.current_theme,mode)
             with open(self.m.CONF_FILE,encoding='utf-8') as handle:
                 self.assertEqual(json.load(handle)['theme'],mode)
@@ -164,3 +167,48 @@ class DesignTests(unittest.TestCase):
             with self.subTest(label=tabs.tabText(index)):
                 needed = tabs.fontMetrics().horizontalAdvance(tabs.tabText(index))+44
                 self.assertGreaterEqual(tabs.tabRect(index).width(),needed)
+
+    def test_project_workspace_matches_request_toolbar_and_bottom_actions(self):
+        w = self.window
+        w.ensure_bus_session_async = lambda purpose,callback:None
+        w.open_new_viewer()
+        self.show()
+        v = w._newdlg
+        pos = lambda widget:widget.mapTo(w,self.m.QPoint(0,0))
+        self.assertEqual(v.btn_refresh.text(),'BUS 신규조회')
+        self.assertEqual(v.btn_manual.text(),'수동 추가')
+        self.assertEqual(v.btn_create.text(),'선택실행')
+        self.assertFalse(hasattr(v,'btn_close'))
+        self.assertLess(pos(v.toolbar).y(),pos(v.tbl).y())
+        self.assertGreater(pos(v.actions_bar).y(),pos(w.logs_panel).y()+w.logs_panel.height()-5)
+        self.assertTrue(w.table.verticalHeader().isHidden()==False)
+        self.assertFalse(v.tbl.verticalHeader().isHidden())
+        self.assertFalse(v.btn_stop.isEnabled())
+        self.assertFalse(v.chk_dry.isHidden())
+        self.assertIn('미리보기',v.chk_dry.text())
+        w.tabs.setCurrentIndex(0)
+        self.assertTrue(v.actions_bar.isHidden())
+
+    def test_toolbar_button_order_and_primary_lookup_actions(self):
+        w = self.window
+        self.assertFalse(hasattr(w,'theme_switch'))
+        self.assertEqual(w.btn_manual.text(),'수동 입력')
+        self.assertNotEqual(w.btn_manual.objectName(),'primaryButton')
+        self.assertEqual(w.btn_request.objectName(),'primaryButton')
+        self.show()
+        self.assertLess(w.btn_manual.x(),w.btn_file.x())
+        self.assertLess(w.btn_file.x(),w.btn_request.x())
+        w.ensure_bus_session_async = lambda purpose,callback:None
+        w.open_new_viewer()
+        self.app.processEvents()
+        v = w._newdlg
+        self.assertLess(v.btn_manual.x(),v.btn_refresh.x())
+        self.assertEqual(v.btn_refresh.objectName(),'primaryButton')
+        self.assertNotEqual(v.btn_manual.objectName(),'primaryButton')
+
+    def test_horizontal_headers_have_no_vertical_separator(self):
+        for mode in ('light','dark'):
+            self.window.apply_theme(mode)
+            style = self.window.styleSheet().split('QHeaderView::section {',1)[1].split('}',1)[0]
+            self.assertNotIn('border-right:1px',style)
+            self.assertIn('border-bottom:1px',style)
