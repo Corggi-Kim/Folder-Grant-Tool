@@ -247,7 +247,7 @@ class DesignTests(unittest.TestCase):
         w = self.window
         self.show()
         for index,badge in enumerate(w.tab_count_badges):
-            self.assertIs(badge.parent(),w.tabs.tabButton(index,self.m.QTabBar.RightSide))
+            self.assertIs(badge.parent(),w.tabs)
             point = badge.mapTo(w.tabs,self.m.QPoint(0,0))
             self.assertTrue(w.tabs.tabRect(index).contains(point))
             self.assertLess(point.y(),w.tabs.tabRect(index).center().y())

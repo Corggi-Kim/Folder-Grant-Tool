@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem, QAbstractItemView, QVBoxLayout, QWidget, QTextEdit, QHBoxLayout,
     QLabel, QHeaderView, QCheckBox, QMenu, QToolButton, QMessageBox, QStyleOptionButton,
     QStyle, QDialog, QLineEdit, QComboBox, QDialogButtonBox, QFormLayout, QStatusBar,
-    QScrollArea, QSpinBox, QProgressBar, QAbstractButton, QTabBar, QStackedWidget, QAction, QStyledItemDelegate, QStyleOptionViewItem
+    QScrollArea, QSpinBox, QProgressBar, QAbstractButton, QTabBar, QStackedWidget, QAction, QStyledItemDelegate, QStyleOptionViewItem, QStyleOptionTab
 )
 from PyQt5.QtGui import QFont, QGuiApplication, QKeySequence, QPainter, QTextOption, QTextCursor, QPixmap, QIcon, QColor, QPen, QPainterPath
 from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QTimer, QPoint, QSize
@@ -2328,6 +2328,44 @@ class CheckBoxHeader(QHeaderView):
         super().mousePressEvent(e)
 
 
+class WorkspaceTabBar(QTabBar):
+    """Keep notification badges attached to the upper right of each label."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.count_badges = []
+
+    def add_count_badges(self):
+        for index in range(self.count()):
+            badge = QLabel('0',self); badge.setObjectName('requestCountBadge')
+            badge.setAlignment(Qt.AlignCenter); badge.setFixedSize(26,18)
+            badge.setAttribute(Qt.WA_TransparentForMouseEvents)
+            self.count_badges.append(badge)
+        self._position_badges()
+
+    def tabSizeHint(self,index):
+        size = super().tabSizeHint(index)
+        size.setWidth(size.width()+24)
+        return size
+
+    def tabLayoutChange(self):
+        super().tabLayoutChange()
+        self._position_badges()
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        self._position_badges()
+
+    def _position_badges(self):
+        for index,badge in enumerate(getattr(self,'count_badges',[])):
+            option = QStyleOptionTab(); self.initStyleOption(option,index)
+            rect = self.style().subElementRect(QStyle.SE_TabBarTabText,option,self)
+            width = option.fontMetrics.horizontalAdvance(self.tabText(index))
+            x = rect.center().x()+width//2+4
+            y = rect.center().y()-option.fontMetrics.height()//2-10
+            badge.move(min(x,self.tabRect(index).right()-badge.width()-3),max(3,y))
+            badge.raise_()
+
+
 class CopyTable(QTableWidget):
     def keyPressEvent(self, event):
         if event.matches(QKeySequence.Copy):
@@ -3920,7 +3958,7 @@ class AccessManager(QMainWindow):
         connection.addStretch(); connection.addWidget(self.execution_mode_label)
         main.addWidget(self.connection_bar)
 
-        self.tabs = QTabBar(); self.tabs.setObjectName('workspaceTabs')
+        self.tabs = WorkspaceTabBar(); self.tabs.setObjectName('workspaceTabs')
         self.tabs.setExpanding(False)
         self.tabs.setElideMode(Qt.ElideNone)
         self.tabs.addTab('권한 요청'); self.tabs.addTab('신규 프로젝트')
@@ -3929,14 +3967,8 @@ class AccessManager(QMainWindow):
         tab_layout.setContentsMargins(18,0,18,0); tab_layout.setSpacing(0)
         tab_layout.addWidget(self.tabs)
         tab_layout.addStretch()
-        self.tab_count_badges = []
-        for index in range(self.tabs.count()):
-            holder = QWidget(); holder.setFixedSize(26,28)
-            holder.setAttribute(Qt.WA_TransparentForMouseEvents)
-            badge = QLabel('0',holder); badge.setObjectName('requestCountBadge')
-            badge.setAlignment(Qt.AlignCenter); badge.setGeometry(0,0,26,18)
-            self.tabs.setTabButton(index,QTabBar.RightSide,holder)
-            self.tab_count_badges.append(badge)
+        self.tabs.add_count_badges()
+        self.tab_count_badges = self.tabs.count_badges
         main.addWidget(tab_row)
         self.workspaces = QStackedWidget()
         self.request_page = QWidget()
