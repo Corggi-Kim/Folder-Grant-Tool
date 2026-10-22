@@ -282,3 +282,21 @@ class DesignTests(unittest.TestCase):
         self.assertNotIn('raw-only-target',text)
         self.assertNotIn('"status"',text)
         self.assertIn('시간 초과',text)
+
+    def test_long_error_message_is_scrollable_without_losing_last_line(self):
+        w = self.window
+        self.show()
+        self.assertIsInstance(w.status_label,self.m.QTextEdit)
+        message = ('\\LSK_S010\\Study Folder\\19087\\Study\\MW: The system cannot find the file specified.\n'*20)+'마지막 오류 줄'
+        w.status_label.setText(message)
+        self.app.processEvents()
+        self.assertEqual(w.status_label.toPlainText(),message)
+        bar = w.status_label.verticalScrollBar()
+        self.assertGreater(bar.maximum(),0)
+        bar.setValue(bar.maximum())
+        w.status_label.setText(message)
+        self.assertEqual(bar.value(),bar.maximum())
+        w.status_label.setText('성공')
+        self.app.processEvents()
+        self.assertEqual(w.status_label.verticalScrollBar().maximum(),0)
+        self.assertLess(w.status_label.height(),50)

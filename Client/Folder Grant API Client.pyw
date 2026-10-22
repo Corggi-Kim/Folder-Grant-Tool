@@ -2328,6 +2328,38 @@ class CheckBoxHeader(QHeaderView):
         super().mousePressEvent(e)
 
 
+class StatusMessage(QTextEdit):
+    """Readable short status with bounded scrolling for long error details."""
+    def __init__(self,text='',parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True); self.setAcceptRichText(False)
+        self.setFrameShape(QTextEdit.NoFrame)
+        self.setLineWrapMode(QTextEdit.WidgetWidth)
+        self.setWordWrapMode(QTextOption.WrapAnywhere)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.document().setDocumentMargin(2)
+        self.document().documentLayout().documentSizeChanged.connect(self._fit_height)
+        self.setText(text)
+
+    def setText(self,text):
+        text = str(text or '')
+        if text==self.toPlainText():
+            return
+        self.setPlainText(text)
+        self.verticalScrollBar().setValue(0)
+        self._fit_height()
+
+    def text(self):
+        return self.toPlainText()
+
+    def _fit_height(self,*args):
+        # Leave a few pixels below the final baseline for Windows/DPI font metrics.
+        needed = int(self.document().size().height()+9)
+        height = min(112,max(24,needed))
+        if self.height()!=height or self.minimumHeight()!=height:
+            self.setFixedHeight(height)
+
+
 class BusySpinner(QWidget):
     def __init__(self,parent=None):
         super().__init__(parent)
@@ -3976,7 +4008,7 @@ class AccessManager(QMainWindow):
         QLabel#stepLabel[state="failed"] {{color:{t['red']};}}
         QWidget#detailBanner {{background:{t['blue_bg']};border-radius:5px;}}
         QLabel#bannerTitle {{color:{t['accent']};font-weight:600;font-size:12px;}}
-        QLabel#bannerBody {{color:{t['muted']};font-size:11px;}}
+        QTextEdit#bannerBody {{background:{t['blue_bg']};color:{t['muted']};font-size:11px;border:0;padding:0;}}
         QWidget#logsPanel {{background:{t['panel']};border:1px solid {t['border']};border-radius:6px;}}
         QTextEdit#jobLog {{background:transparent;border:0;border-top:1px solid {t['border']};padding:7px 2px;color:{t['text']};font-size:12px;}}
         QWidget#actionsBar {{background:{t['bg']};}}
@@ -4260,7 +4292,7 @@ class AccessManager(QMainWindow):
         self.progress_panel = QWidget(); self.progress_panel.setObjectName('detailBanner')
         banner = QVBoxLayout(self.progress_panel); banner.setContentsMargins(12,10,12,10); banner.setSpacing(3)
         self.detail_banner_title = QLabel('선택 요청 대기'); self.detail_banner_title.setObjectName('bannerTitle'); self.detail_banner_title.setWordWrap(True)
-        self.status_label = QLabel('목록에서 요청을 선택하세요.'); self.status_label.setWordWrap(True)
+        self.status_label = StatusMessage('목록에서 요청을 선택하세요.')
         self.status_label.setObjectName('bannerBody')
         banner.addWidget(self.detail_banner_title); banner.addWidget(self.status_label)
         detail.addWidget(self.progress_panel)

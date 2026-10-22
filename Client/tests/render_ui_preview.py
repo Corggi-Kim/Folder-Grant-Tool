@@ -59,6 +59,17 @@ def render():
             w._mark_list_loaded('project',w._newdlg.tbl.rowCount())
             app.processEvents()
             w.grab().save(str(output/'client-projects-v1.1.0.png'))
+        if '--error' in __import__('sys').argv:
+            w.tabs.setCurrentIndex(0); w.apply_theme('light')
+            error = '\\\\LSK_S010\\Study Folder\\19087\\Study\\MW: The system cannot find the file specified.\nicacls grant failed: 2'
+            w.table.item(0,w.COL_PROJ).setText('1987')
+            w.table.item(0,w.COL_LV3).setText('MW')
+            w._set_row_metadata(0,dict(source='bus',result=dict(status='partially_succeeded',error_code='POWERSHELL_FAILED',error_message=error,
+                steps=[dict(type='add_ad_group_member',status='succeeded'),dict(type='grant_folder_acl',status='failed')])))
+            w.table.item(0,w.COL_STATUS).setText('BUS 완료 보류: POWERSHELL_FAILED')
+            w.table.setCurrentCell(0,w.COL_PROJ); w._refresh_detail()
+            for _ in range(4):app.processEvents()
+            w.grab().save(str(output/'client-error-detail-v1.1.0.png'))
         if '--startup' in __import__('sys').argv:
             from PyQt5.QtTest import QTest
             w.hide()
