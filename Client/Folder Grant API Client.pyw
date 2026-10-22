@@ -3620,8 +3620,9 @@ class AccessManager(QMainWindow):
         QCheckBox::indicator:disabled {{border-color:{t['border']};}}
         QCheckBox#themeSwitch::indicator {{width:31px;height:17px;border-radius:9px;background:{t['button_border']};image:none;}}
         QCheckBox#themeSwitch::indicator:checked {{background:{t['accent']};image:none;}}
-        QTabBar#workspaceTabs {{background:{t['panel']};border:0;}}
-        QTabBar::tab {{background:transparent;color:{t['text']};padding:17px 20px 14px;margin-left:18px;border-bottom:3px solid transparent;font-weight:600;font-size:15px;}}
+        QWidget#workspaceTabRow {{background:{t['panel']};border-bottom:1px solid {t['border']};}}
+        QTabBar#workspaceTabs {{background:{t['panel']};border:0;font-size:15px;font-weight:600;}}
+        QTabBar::tab {{background:transparent;color:{t['text']};padding:15px 22px 13px;min-height:24px;border-bottom:3px solid transparent;}}
         QTabBar::tab:selected {{color:{t['accent']};border-bottom-color:{t['accent']};}}
         QTabBar::tab:disabled {{color:{t['disabled']};}}
         QWidget#requestToolbar {{background:{t['panel']};border:1px solid {t['border']};border-top-left-radius:6px;border-top-right-radius:6px;}}
@@ -3848,8 +3849,13 @@ class AccessManager(QMainWindow):
 
         self.tabs = QTabBar(); self.tabs.setObjectName('workspaceTabs')
         self.tabs.setExpanding(False)
+        self.tabs.setElideMode(Qt.ElideNone)
         self.tabs.addTab('권한 요청'); self.tabs.addTab('신규 프로젝트')
-        main.addWidget(self.tabs)
+        tab_row = QWidget(); tab_row.setObjectName('workspaceTabRow')
+        tab_layout = QHBoxLayout(tab_row)
+        tab_layout.setContentsMargins(18,0,18,0); tab_layout.setSpacing(0)
+        tab_layout.addWidget(self.tabs)
+        main.addWidget(tab_row)
         self.workspaces = QStackedWidget()
         self.request_page = QWidget()
         request_layout = QVBoxLayout(self.request_page)

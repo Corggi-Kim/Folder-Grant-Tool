@@ -154,3 +154,13 @@ class DesignTests(unittest.TestCase):
         self.assertIn('실제',w.execution_mode_label.text())
         self.assertIn('연결됨',w.api_status_label.text())
         viewer.close()
+
+    def test_workspace_tab_metrics_use_the_same_font_as_the_painted_labels(self):
+        self.show()
+        tabs = self.window.tabs
+        self.assertEqual(tabs.font().pixelSize(),15)
+        self.assertEqual(tabs.elideMode(),self.m.Qt.ElideNone)
+        for index in range(tabs.count()):
+            with self.subTest(label=tabs.tabText(index)):
+                needed = tabs.fontMetrics().horizontalAdvance(tabs.tabText(index))+44
+                self.assertGreaterEqual(tabs.tabRect(index).width(),needed)
