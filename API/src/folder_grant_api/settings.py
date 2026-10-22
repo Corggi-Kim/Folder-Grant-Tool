@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     port: int = 8000
     executor_mode: Literal["mock", "powershell"] = "mock"
     powershell_path: str = "powershell.exe"
-    powershell_timeout_seconds: int = 300
+    powershell_timeout_seconds: int = 10800
     template_root: str = r"\\LSK_S010\Study folder\_Template"
     group_ou_path: str = r"OU=Group Project Folder,OU=0.Management Object Group,OU=lskglobal,DC=lskglobal,DC=com"
     share_root: str = r"\\LSK_S010\Study Folder\{proj_seg}\{lv2}\{lv3}"

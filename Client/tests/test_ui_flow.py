@@ -36,6 +36,114 @@ class UiFlowTests(unittest.TestCase):
         self.completed = []
         self.window.trigger_session_process.connect(self.completed.extend)
         self.window._ensure_bus_session = Mock(return_value=True)
+        self.refresh_results = {}
+        self.api_calls = []
+        self.install_refresh_api()
+
+    def install_refresh_api(self):
+        from urllib.parse import unquote
+        api = self.m.FolderGrantApiClient('http://localhost:8000','test')
+        def request(method,path,payload=None):
+            self.api_calls.append((method,path,payload))
+            self.assertEqual(method,'GET','Completion recovery must never register or rerun jobs')
+            request_id = unquote(path.rsplit('/',1)[-1])
+            override = self.refresh_results.get(request_id)
+            if isinstance(override,Exception):
+                raise override
+            if override is not None:
+                return override
+            for row in range(self.window.table.rowCount()):
+                meta = self.window._row_metadata(row)
+                if meta.get('request_id') == request_id:
+                    result = meta.get('result',{})
+                    if result:
+                        return dict(result,request_id=request_id,job_id=result.get('job_id','J1'))
+            raise self.m.ApiClientError('not found',404)
+        api.request = request
+        self.window._api_client = Mock(return_value=api)
+
+    def wait_for_api(self):
+        deadline = time.monotonic()+3
+        while self.window.api_thread is not None and time.monotonic()<deadline:
+            self.app.processEvents(); time.sleep(0.01)
+        self.app.processEvents()
+        self.assertIsNone(self.window.api_thread)
+
+    def test_complete_recovers_server_success_after_client_lookup_error(self):
+        self.install_refresh_api()
+        row = self.row()
+        request_id = self.window._row_metadata(row)['request_id']
+        self.refresh_results[request_id] = dict(request_id=request_id,job_id='late-job',
+                                               status='succeeded',executor_mode='powershell')
+        self.window.current_row = row
+        self.window._on_api_error('API 조회 시간 초과')
+        self.window.run_complete()
+        self.wait_for_api()
+        self.assertEqual([x['row'] for x in self.completed],[row])
+        self.assertEqual(self.window._row_metadata(row)['result']['job_id'],'late-job')
+        self.assertTrue(self.api_calls)
+
+    def test_complete_does_not_trust_cached_success_when_lookup_fails(self):
+        self.install_refresh_api()
+        row = self.row(result=dict(status='succeeded',executor_mode='powershell'))
+        request_id = self.window._row_metadata(row)['request_id']
+        self.refresh_results[request_id] = self.m.ApiClientError('API 연결 실패')
+        self.window.run_complete()
+        self.wait_for_api()
+        self.assertFalse(self.completed)
+        self.assertTrue(self.api_calls)
+
+    def test_complete_refresh_keeps_running_and_timeout_jobs_pending(self):
+        self.install_refresh_api()
+        for status in ('running','failed','partially_succeeded','simulated'):
+            row = self.row()
+            request_id = self.window._row_metadata(row)['request_id']
+            self.refresh_results[request_id] = dict(request_id=request_id,job_id=f'job-{row}',
+                status=status,executor_mode='powershell' if status!='simulated' else 'mock',
+                error_code='POWERSHELL_TIMEOUT' if status in {'failed','partially_succeeded'} else None)
+        self.window.run_complete()
+        self.wait_for_api()
+        self.assertEqual(len(self.api_calls),4)
+        self.assertFalse(self.completed)
+        self.assertIn('running',self.window._row_metadata(0)['result']['status'])
+
+    def test_complete_recovers_running_job_on_a_later_click(self):
+        row = self.row()
+        request_id = self.window._row_metadata(row)['request_id']
+        self.refresh_results[request_id] = dict(request_id=request_id,job_id='long-job',
+                                               status='running',executor_mode='powershell')
+        self.window.run_complete()
+        self.wait_for_api()
+        self.assertFalse(self.completed)
+        self.refresh_results[request_id]['status'] = 'succeeded'
+        self.window.run_complete()
+        self.wait_for_api()
+        self.assertEqual([x['row'] for x in self.completed],[row])
+        self.assertEqual(len(self.api_calls),2)
+
+    def test_complete_rejects_response_for_another_request(self):
+        row = self.row(result=dict(status='succeeded',executor_mode='powershell'))
+        request_id = self.window._row_metadata(row)['request_id']
+        self.refresh_results[request_id] = dict(request_id='OTHER',job_id='wrong-job',
+                                               status='succeeded',executor_mode='powershell')
+        self.window.run_complete()
+        self.wait_for_api()
+        self.assertFalse(self.completed)
+        self.assertFalse(self.window._row_metadata(row)['result'])
+
+    def test_stop_during_completion_refresh_never_completes_bus(self):
+        row = self.row(result=dict(status='succeeded',executor_mode='powershell'))
+        api = self.window._api_client()
+        request = api.request
+        def delayed_request(*args):
+            time.sleep(0.1)
+            return request(*args)
+        api.request = delayed_request
+        self.window.run_complete()
+        self.m.QTimer.singleShot(10,self.window._stop_all)
+        self.wait_for_api()
+        self.assertTrue(self.window.stop_requested)
+        self.assertFalse(self.completed)
 
     def tearDown(self):
         self.window.close()
@@ -63,6 +171,7 @@ class UiFlowTests(unittest.TestCase):
         self.row('bus',dict(status='simulated',executor_mode='mock'))
         valid = self.row('bus',good)
         self.window.run_complete()
+        self.wait_for_api()
         self.assertEqual([x['row'] for x in self.completed], [valid])
 
     def test_auto_completion_blocks_mock_and_stopped(self):
@@ -83,6 +192,7 @@ class UiFlowTests(unittest.TestCase):
         w._on_session_processed([dict(row=row,ok=False,msg='BUS failed')])
         self.completed.clear()
         w.run_complete()
+        self.wait_for_api()
         self.assertEqual([x['row'] for x in self.completed],[row])
         self.assertEqual(w._row_metadata(row)['result']['job_id'],'J1')
 
@@ -252,4 +362,5 @@ class UiFlowTests(unittest.TestCase):
             return True
         w._ensure_bus_session = prepare
         w.run_complete()
+        self.wait_for_api()
         self.assertEqual(len(self.completed),1)

@@ -639,6 +639,41 @@ def load_api_config() -> dict:
     return dict(base_url=DEFAULT_API_URL,api_key='')
 
 
+class ApiJobRefreshWorker(QObject):
+    refreshed = pyqtSignal(int,dict)
+    failed = pyqtSignal(int,str)
+    finished = pyqtSignal()
+
+    def __init__(self,client,requests):
+        super().__init__()
+        self.client = client
+        self.requests = list(requests)
+        self._stop_event = threading.Event()
+
+    def stop(self):
+        self._stop_event.set()
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            for row,request_id in self.requests:
+                if self._stop_event.is_set():
+                    break
+                try:
+                    result = self.client.request('GET','/api/v1/access-jobs/by-request/'+quote(request_id,safe=''))
+                    if result.get('request_id') != request_id:
+                        raise ApiClientError('서버 Job의 요청번호가 현재 행과 일치하지 않습니다.')
+                    if not self._stop_event.is_set():
+                        self.refreshed.emit(row,result)
+                except Exception as exc:
+                    message = str(exc)
+                    if self.client.api_key:
+                        message = message.replace(self.client.api_key,'[API Key]')
+                    self.failed.emit(row,message)
+        finally:
+            self.finished.emit()
+
+
 class ApiConnectionTask(QObject):
     succeeded = pyqtSignal(dict)
     failed = pyqtSignal(str)
@@ -4237,17 +4272,74 @@ class AccessManager(QMainWindow):
             return
         self.stop_requested = False
         self._ignore_bus_results = False
-        targets = []
+        requests = []
         for row in range(self.table.rowCount()):
             if not self._is_row_checked(row):
                 continue
             meta = self._row_metadata(row)
-            result = meta.get('result',{})
-            if (not meta.get('bus_done') and can_complete_bus(result,meta.get('source'),result.get('client_stopped',False))):
-                targets.append(self._bus_target(row))
+            if meta.get('source') == 'bus' and not meta.get('bus_done') and meta.get('request_id'):
+                requests.append((row,meta['request_id']))
             else:
-                self._log(f'{row+1}행: BUS 요청의 실제 API 성공 결과가 없어 완료 처리에서 제외했습니다.')
-        if not targets:
+                self._log(f'{row+1}행: 미완료 BUS 요청번호가 없어 완료 처리에서 제외했습니다.')
+        if not requests:
+            return
+        if not self.api_config.get('api_key'):
+            self._open_api_settings()
+            if not self.api_config.get('api_key'):
+                return
+        self._completion_targets = []
+        thread = QThread(self)
+        worker = ApiJobRefreshWorker(self._api_client(),requests)
+        self.api_thread,self.api_worker = thread,worker
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.refreshed.connect(self._on_completion_refreshed)
+        worker.failed.connect(self._on_completion_refresh_error)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit,type=Qt.DirectConnection)
+        thread.finished.connect(self._completion_refresh_finished)
+        thread.finished.connect(thread.deleteLater)
+        self._set_running_ui(True)
+        self._set_progress_status('BUS 완료 전 서버 작업 상태 재조회', '',0,len(requests),running=True)
+        thread.start()
+
+    def _on_completion_refreshed(self,row,result):
+        meta = self._row_metadata(row)
+        meta['result'] = dict(result)
+        self._set_row_metadata(row,meta)
+        self._log(f'{row+1}행 서버 재조회: '+json.dumps(result,ensure_ascii=False))
+        if can_complete_bus(result,meta.get('source'),self.stop_requested or self._closing):
+            self._completion_targets.append(self._bus_target(row))
+            self.table.item(row,self.COL_STATUS).setText('서버 성공 확인 (BUS 완료 대기)')
+        else:
+            status = result.get('status','unknown')
+            reason = result.get('error_code') or status
+            self.table.item(row,self.COL_STATUS).setText('BUS 완료 보류: '+reason)
+            if reason == 'POWERSHELL_TIMEOUT':
+                self._log(f'{row+1}행: 서버가 PowerShell을 시간 초과로 종료했습니다. '
+                          '서버 실행 제한을 변경해도 기존 실패 Job은 재개되지 않습니다. '
+                          '부분 적용 상태 확인 및 별도 재실행이 필요합니다.')
+            elif status in {'queued','running','cancel_requested'}:
+                self._log(f'{row+1}행: 서버 작업이 아직 끝나지 않았습니다. 나중에 완료 처리를 다시 누르면 재조회합니다.')
+
+    def _on_completion_refresh_error(self,row,message):
+        meta = self._row_metadata(row)
+        meta['result'] = {}
+        self._set_row_metadata(row,meta)
+        self.table.item(row,self.COL_STATUS).setText('BUS 완료 보류: 서버 재조회 실패')
+        self._log(f'{row+1}행: {message}. 이전 성공 결과로 BUS 완료를 진행하지 않습니다.')
+
+    def _completion_refresh_finished(self):
+        self.api_worker = None
+        self.api_thread = None
+        if self._closing:
+            QTimer.singleShot(0,self.close)
+            return
+        targets = self._completion_targets
+        self._completion_targets = []
+        if self.stop_requested or not targets:
+            self._set_running_ui(False)
+            self._finish_progress_status('BUS 완료 보류' if not self.stop_requested else '중지됨',stopped=self.stop_requested)
             return
         self._waiting_for_bus = True
         ready = self._ensure_bus_session('완료 처리')
@@ -4976,6 +5068,10 @@ class AccessManager(QMainWindow):
 
 
     def _on_api_progress(self, job):
+        meta = self._row_metadata(self.current_row)
+        if job.get('job_id'):
+            meta['job_id'] = job['job_id']
+            self._set_row_metadata(self.current_row,meta)
         self._set_progress_status(f"API {job.get('status','')} / {job.get('job_id','')}",
                                  self._get(self.current_row,self.COL_PROJ),self.done_jobs,self.total_jobs,running=True)
 
@@ -4992,6 +5088,11 @@ class AccessManager(QMainWindow):
                  'failed':'API 실패', 'cancelled':'취소됨'}.get(status,'알 수 없는 결과')
         self.table.item(row,self.COL_STATUS).setText(label)
         self._log(json.dumps(result,ensure_ascii=False,indent=2))
+        if result.get('error_code') == 'POWERSHELL_TIMEOUT':
+            self.table.item(row,self.COL_STATUS).setText('서버 시간 초과 (BUS 완료 보류)')
+            self._log('서버 PowerShell 실행 제한을 초과하여 작업이 종료됐습니다. '
+                      'API/.env의 FGT_POWERSHELL_TIMEOUT_SECONDS를 확인하세요. '
+                      '실패 Job은 완료 버튼으로 성공 처리할 수 없습니다.')
         self.done_jobs += 1
         stopped = self.stop_requested or result.get('client_stopped',False)
         if (self.auto_complete_after_add and not meta.get('bus_done')
