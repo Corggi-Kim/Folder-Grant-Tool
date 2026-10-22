@@ -300,3 +300,23 @@ class DesignTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(w.status_label.verticalScrollBar().maximum(),0)
         self.assertLess(w.status_label.height(),50)
+
+    def test_disabled_buttons_have_muted_backgrounds_in_both_themes(self):
+        w = self.window
+        self.show()
+        for mode in ('light','dark'):
+            w.apply_theme(mode)
+            for button in (w.btn_request,w.btn_run_execute,w.btn_manual,w.btn_stop,w.btn_clear_log):
+                button.setEnabled(False)
+                self.app.processEvents()
+                pixel = button.grab().toImage().pixelColor(2,button.height()//2).name()
+                self.assertEqual(pixel,self.m.THEMES[mode]['badge'],(mode,button.text()))
+            w.btn_request.setEnabled(True)
+            self.app.processEvents()
+            pixel = w.btn_request.grab().toImage().pixelColor(6,w.btn_request.height()//2).name()
+            self.assertEqual(pixel,self.m.THEMES[mode]['accent'])
+
+    def test_replayed_result_explains_that_it_did_not_rerun(self):
+        result = dict(status='partially_succeeded',error_code='POWERSHELL_FAILED',replayed=True)
+        self.assertIn('이전 작업 결과',self.window._api_log_summary(result,'프로젝트 1987'))
+        self.assertIn('재실행 안 함',self.window._api_log_summary(result,'프로젝트 1987'))

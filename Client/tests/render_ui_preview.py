@@ -70,6 +70,13 @@ def render():
             w.table.setCurrentCell(0,w.COL_PROJ); w._refresh_detail()
             for _ in range(4):app.processEvents()
             w.grab().save(str(output/'client-error-detail-v1.1.0.png'))
+        if '--busy' in __import__('sys').argv:
+            w.tabs.setCurrentIndex(0); w._set_running_ui(True)
+            for mode in ('light','dark'):
+                w.apply_theme(mode)
+                for _ in range(4):app.processEvents()
+                w.grab().save(str(output/f'client-busy-{mode}-v1.1.0.png'))
+            w._set_running_ui(False)
         if '--startup' in __import__('sys').argv:
             from PyQt5.QtTest import QTest
             w.hide()

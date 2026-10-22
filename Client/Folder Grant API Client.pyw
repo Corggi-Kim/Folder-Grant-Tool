@@ -3965,22 +3965,25 @@ class AccessManager(QMainWindow):
         QLabel#modeBadge[mode="powershell"] {{background:{t['amber_bg']};color:{t['amber']};border-color:{t['amber_border']};}}
         QLabel#modeBadge[mode="mock"] {{background:{t['blue_bg']};color:{t['accent']};}}
         QPushButton {{background:{t['panel']};border:1px solid {t['button_border']};border-radius:5px;padding:7px 12px;min-height:20px;}}
-        QPushButton:hover {{background:{t['hover']};border-color:{t['accent']};}}
-        QPushButton:pressed {{background:{t['select']};}}
+        QPushButton:hover:enabled {{background:{t['hover']};border-color:{t['accent']};}}
+        QPushButton:pressed:enabled {{background:{t['select']};}}
         QPushButton#primaryButton {{background:{t['accent']};color:#ffffff;border-color:{t['accent']};font-weight:500;}}
-        QPushButton#primaryButton:hover {{background:{t['accent_hover']};}}
+        QPushButton#primaryButton:hover:enabled {{background:{t['accent_hover']};}}
         QPushButton#dangerButton {{color:{t['red']};border-color:{t['red']};min-width:52px;}}
         QPushButton#textButton {{border:0;background:transparent;color:{t['muted']};font-size:12px;padding:3px 4px;}}
-        QPushButton:disabled {{color:{t['disabled']};background:{t['bg']};border-color:{t['border']};}}
+        QPushButton:disabled, QPushButton#primaryButton:disabled, QPushButton#dangerButton:disabled, QPushButton#textButton:disabled {{color:{t['disabled']};background:{t['badge']};border:1px solid {t['border']};font-weight:400;}}
         QToolButton {{border:0;padding:4px;}}
         QToolButton#utilityButton {{font-size:23px;min-width:28px;}}
-        QToolButton:hover {{color:{t['accent']};}}
+        QToolButton:hover:enabled {{color:{t['accent']};}}
+        QToolButton:disabled, QToolButton#utilityButton:disabled, QToolButton#logToggle:disabled {{color:{t['disabled']};background:{t['badge']};}}
         QToolButton::menu-indicator {{image:none;}}
         QToolButton#logToggle {{font-size:13px;font-weight:600;padding:3px 0;}}
         QCheckBox {{spacing:7px;}}
         QCheckBox::indicator {{width:15px;height:15px;border:1px solid {t['button_border']};border-radius:3px;background:{t['panel']};}}
         QCheckBox::indicator:checked {{background:{t['accent']};border-color:{t['accent']};image:url({self._checkmark_path()});}}
-        QCheckBox::indicator:disabled {{border-color:{t['border']};}}
+        QCheckBox:disabled {{color:{t['disabled']};}}
+        QCheckBox::indicator:disabled {{background:{t['badge']};border-color:{t['border']};}}
+        QCheckBox::indicator:checked:disabled {{background:{t['button_border']};border-color:{t['button_border']};}}
         QCheckBox#themeSwitch::indicator {{width:31px;height:17px;border-radius:9px;background:{t['button_border']};image:none;}}
         QCheckBox#themeSwitch::indicator:checked {{background:{t['accent']};image:none;}}
         QWidget#workspaceTabRow {{background:{t['panel']};border-bottom:1px solid {t['border']};}}
@@ -4017,6 +4020,7 @@ class AccessManager(QMainWindow):
         QMenu {{background:{t['panel']};border:1px solid {t['border']};padding:5px;}}
         QMenu::item {{padding:7px 18px;border-radius:3px;}}
         QMenu::item:selected {{background:{t['select']};}}
+        QMenu::item:disabled {{color:{t['disabled']};background:transparent;}}
         QMenu::separator {{height:1px;background:{t['border']};margin:5px;}}
         QScrollBar:vertical {{background:{t['bg']};width:9px;margin:0;}}
         QScrollBar::handle:vertical {{background:{t['button_border']};border-radius:4px;min-height:25px;}}
@@ -5222,6 +5226,8 @@ class AccessManager(QMainWindow):
         error = result.get('error_code')
         if error:
             label += ' · '+('서버 시간 초과' if error=='POWERSHELL_TIMEOUT' else str(error))
+        if result.get('replayed'):
+            label += ' · 이전 작업 결과 · 재실행 안 함'
         return f'{context}: {label}'
 
     def _log(self, message: str, seq: int = None, dry: bool = False, *, summary: str = None):
