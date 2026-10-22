@@ -7,7 +7,7 @@
 #            └─ fgt.ico
 #
 # 2) 실행 시 생성/사용 경로 (코드에서 자동 생성)
-#    - C:\FGT\Log       : 실행 로그(access_YYYYMMDD.log)
+#    - C:\FGT\Log       : 실행 로그(access.log)
 #    - C:\FGT\conf      : 설정(login.json, theme 등)
 #    - C:\FGT\ef         : 엑셀파일 다운로드
 #    - C:\FGT\debug   : 디버그 파일
@@ -98,7 +98,7 @@ HELP_TEXT = r"""[Folder Grant API Client 사용 안내]
 9) 중지: 새 작업 등록을 멈추고 실행 Job에 취소를 요청합니다.
    이미 실행 중인 서버 PowerShell 단계는 즉시 종료되지 않을 수 있습니다.
 10) BUS 조회 행을 편집하면 수동 요청으로 전환합니다. 기존 성공 결과는 무효화됩니다.
-11) 로그: C:\FGT\Log\access_YYYYMMDD.log, 다운로드: C:\FGT\ef
+11) 로그: C:\FGT\Log\access.log, 다운로드: C:\FGT\ef
 12) 테마는 상단 아이콘/스위치로 전환합니다. 설정은 톱니바퀴 메뉴에 있습니다.
 13) 이름·부서·Role 편집은 톱니바퀴의 상세 열 표시를 사용합니다. 상세 절차는 Client/README.md를 확인하세요.
 """
@@ -3005,7 +3005,8 @@ class NewItemsViewer(QDialog):
             item.setToolTip(json.dumps(result,ensure_ascii=False,indent=2))
         self.tbl.setItem(row,self._status_col,QTableWidgetItem(self._project_result_label(result)))
         self._refresh_project_detail()
-        self.host._log('프로젝트 결과: '+json.dumps(result,ensure_ascii=False,indent=2))
+        self.host._log('프로젝트 결과: '+json.dumps(result,ensure_ascii=False,indent=2),
+                       summary=self.host._api_log_summary(result,f'프로젝트 {item.text() if item else row+1}'))
 
 
     def _project_thread_finished(self):
@@ -4512,7 +4513,8 @@ class AccessManager(QMainWindow):
         meta = self._row_metadata(row)
         meta['result'] = dict(result)
         self._set_row_metadata(row,meta)
-        self._log(f'{row+1}행 서버 재조회: '+json.dumps(result,ensure_ascii=False))
+        self._log(f'{row+1}행 서버 재조회: '+json.dumps(result,ensure_ascii=False),
+                  summary=self._api_log_summary(result,f'{row+1}행 서버 재조회'))
         if can_complete_bus(result,meta.get('source'),self.stop_requested or self._closing):
             self._completion_targets.append(self._bus_target(row))
             self.table.item(row,self.COL_STATUS).setText('서버 성공 확인 (BUS 완료 대기)')
@@ -4533,7 +4535,8 @@ class AccessManager(QMainWindow):
         meta['result'] = {}
         self._set_row_metadata(row,meta)
         self.table.item(row,self.COL_STATUS).setText('BUS 완료 보류: 서버 재조회 실패')
-        self._log(f'{row+1}행: {message}. 이전 성공 결과로 BUS 완료를 진행하지 않습니다.')
+        self._log(f'{row+1}행: {message}. 이전 성공 결과로 BUS 완료를 진행하지 않습니다.',
+                  summary=f'{row+1}행: 서버 재조회 실패 · BUS 완료 보류 (상세 내용은 로그 파일 확인)')
 
     def _completion_refresh_finished(self):
         self.api_worker = None
@@ -4849,7 +4852,8 @@ class AccessManager(QMainWindow):
         self.current_seq = self.done_jobs+1
         self.current_mode = 'add' if payload['operation']=='grant' else 'remove'
         self.table.item(row,self.COL_STATUS).setText('Preview 조회 중' if dry else 'API 실행중')
-        self._log(f"API {'Preview' if dry else 'Job'} 요청: {payload['request_id']}")
+        self._log(f"API {'Preview' if dry else 'Job'} 요청: {payload['request_id']}",
+                  summary=f"{row+1}행 · 프로젝트 {self._get(row,self.COL_PROJ)}: {'미리보기' if dry else '권한 작업'} 요청")
         thread = QThread(self)
         worker = ApiJobWorker(self._api_client(),'access',payload,dry)
         self.api_thread,self.api_worker = thread,worker
@@ -4912,30 +4916,41 @@ class AccessManager(QMainWindow):
         else:
             self._log(f"수동 입력 추가: 구분={kind}, 요청={reqtype}, 사번={user}, 프로젝트={proj}, L2={lv2}, L3={lv3}, ROLE={'없음' if not role else role}")
 
-    def _log(self, message: str, seq: int = None, dry: bool = False):
+    @staticmethod
+    def _api_log_summary(result,context):
+        status = result.get('status','unknown')
+        label = {'preview':'미리보기 완료','simulated':'모의 실행 완료','succeeded':'성공',
+                 'partially_succeeded':'부분 성공','failed':'실패','cancelled':'중지됨',
+                 'running':'실행 중','queued':'실행 대기'}.get(status,'결과 확인 필요')
+        if result.get('bus_done'):
+            label += ' · BUS 완료'
+        error = result.get('error_code')
+        if error:
+            label += ' · '+('서버 시간 초과' if error=='POWERSHELL_TIMEOUT' else str(error))
+        return f'{context}: {label}'
+
+    def _log(self, message: str, seq: int = None, dry: bool = False, *, summary: str = None):
         api_key = getattr(self,'api_config',{}).get('api_key','')
-        if api_key:
-            message = message.replace(api_key,'[API Key]')
-        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        dry_str = " Dry" if dry else ""
-        tag = f"{dry_str} #{seq}" if seq is not None else ""
-
-        norm = (message or "").replace("\r", "\n").replace("\t", "    ").rstrip()
-        block = f"[{ts}{tag}]\n{norm}\n"
-
-        cursor = self.log.textCursor()
-        cursor.movePosition(QTextCursor.End)
+        def sanitize(value):
+            value = str(value or '')
+            return value.replace(api_key,'[API Key]') if api_key else value
+        detailed = sanitize(message)
+        visible = sanitize(summary if summary is not None else message)
+        ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        dry_str = ' Dry' if dry else ''
+        tag = f'{dry_str} #{seq}' if seq is not None else ''
+        norm = detailed.replace('\r','\n').replace('\t','    ').rstrip()
+        block = f'[{ts}{tag}]\n{norm}\n'
+        # The file keeps the full record; the GUI receives its own short message.
+        with open(os.path.join(LOG_DIR,'access.log'),'a',encoding='utf-8') as handle:
+            handle.write(block)
+        visible = ' '.join(visible.split())
+        cursor = self.log.textCursor(); cursor.movePosition(QTextCursor.End)
         self.log.setTextCursor(cursor)
-
         if self.log.toPlainText():
-            self.log.insertPlainText("\n")
-
-        self.log.insertPlainText(block)
+            self.log.insertPlainText('\n')
+        self.log.insertPlainText(f'[{ts}{tag}] {visible}')
         self.log.ensureCursorVisible()
-
-        fn = os.path.join(LOG_DIR, f"access_{datetime.date.today().strftime('%Y%m%d')}.log")
-        with open(fn, "a", encoding="utf-8") as f:
-            f.write(block)
 
     def choose_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "승인 엑셀 선택", "", "Excel Files (*.xlsx *.xls)")
@@ -5304,7 +5319,8 @@ class AccessManager(QMainWindow):
                  'succeeded':'API 성공', 'partially_succeeded':'부분 성공 (BUS 미처리)',
                  'failed':'API 실패', 'cancelled':'취소됨'}.get(status,'알 수 없는 결과')
         self.table.item(row,self.COL_STATUS).setText(label)
-        self._log(json.dumps(result,ensure_ascii=False,indent=2))
+        self._log(json.dumps(result,ensure_ascii=False,indent=2),
+                  summary=self._api_log_summary(result,f'{row+1}행 · 프로젝트 {self._get(row,self.COL_PROJ)}'))
         if result.get('error_code') == 'POWERSHELL_TIMEOUT':
             self.table.item(row,self.COL_STATUS).setText('서버 시간 초과 (BUS 완료 보류)')
             self._log('서버 PowerShell 실행 제한을 초과하여 작업이 종료됐습니다. '
@@ -5330,7 +5346,7 @@ class AccessManager(QMainWindow):
     def _on_api_error(self, message):
         self._set_api_connection_state(False)
         self.table.item(self.current_row,self.COL_STATUS).setText('API 오류 (등록 결과 확인 필요)')
-        self._log(message)
+        self._log(message,summary='API 요청 오류 · 상세 내용은 로그 파일을 확인하세요.')
         self.done_jobs += 1
 
 

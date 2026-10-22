@@ -251,3 +251,33 @@ class DesignTests(unittest.TestCase):
             point = badge.mapTo(w.tabs,self.m.QPoint(0,0))
             self.assertTrue(w.tabs.tabRect(index).contains(point))
             self.assertLess(point.y(),w.tabs.tabRect(index).center().y())
+
+    def test_screen_log_is_summary_and_file_log_keeps_detail(self):
+        from pathlib import Path
+        w = self.window
+        w.log.clear()
+        detail = json.dumps({'steps':[{'target':'detail-only-target'}],'api_key':'test'})
+        w._log(detail,summary='프로젝트 26-012: 권한 적용 성공')
+        self.assertIn('권한 적용 성공',w.log.toPlainText())
+        self.assertNotIn('detail-only-target',w.log.toPlainText())
+        path = Path(self.fixture.tmp.name)/'access.log'
+        saved = path.read_text(encoding='utf-8')
+        self.assertIn('detail-only-target',saved)
+        self.assertNotIn('"test"',saved)
+        w._clear_log()
+        w._log('두 번째 작업')
+        self.assertIn('detail-only-target',path.read_text(encoding='utf-8'))
+        self.assertIn('두 번째 작업',path.read_text(encoding='utf-8'))
+        self.assertEqual(list(Path(self.fixture.tmp.name).glob('access_*.log')),[])
+
+    def test_api_result_logs_a_readable_summary_without_raw_schema(self):
+        w = self.window
+        row = self.fixture.row()
+        w.current_row = row
+        w.auto_complete_after_add = False
+        w.log.clear()
+        w._on_api_result({'status':'failed','error_code':'POWERSHELL_TIMEOUT','steps':[{'target':'raw-only-target'}]})
+        text = w.log.toPlainText()
+        self.assertNotIn('raw-only-target',text)
+        self.assertNotIn('"status"',text)
+        self.assertIn('시간 초과',text)
