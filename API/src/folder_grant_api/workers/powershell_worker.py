@@ -29,6 +29,8 @@ def execute_powershell_job(session_factory: sessionmaker, settings: Settings, jo
                 session.commit()
                 return
 
+            if step.status == "succeeded":
+                continue
             step.status = "running"
             step.started_at = utc_now()
             session.commit()

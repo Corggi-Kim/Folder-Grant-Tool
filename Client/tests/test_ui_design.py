@@ -66,11 +66,12 @@ class DesignTests(unittest.TestCase):
     def test_connection_strip_does_not_invent_live_connectivity_or_executor_mode(self):
         w = self.window
         self.assertIn('미확인',w.api_status_label.text())
-        self.assertIn('미확인',w.execution_mode_label.text())
+        self.assertFalse(hasattr(w,'execution_mode_label'))
+        self.assertIsNone(w._executor_mode)
         w.current_row = self.fixture.row()
         w._on_api_progress(dict(job_id='J',status='running',executor_mode='mock',steps=[]))
         self.assertIn('연결됨',w.api_status_label.text())
-        self.assertIn('모의',w.execution_mode_label.text())
+        self.assertEqual(w._executor_mode,'mock')
 
     def test_both_palettes_and_log_collapse_preserve_state(self):
         w = self.window
@@ -154,7 +155,7 @@ class DesignTests(unittest.TestCase):
         viewer = self.m.NewItemsViewer(w)
         viewer.set_data(['프로젝트코드','프로젝트명'],[['26-012','Test']])
         viewer._on_project_result(0,dict(status='succeeded',executor_mode='powershell'))
-        self.assertIn('실제',w.execution_mode_label.text())
+        self.assertEqual(w._executor_mode,'powershell')
         self.assertIn('연결됨',w.api_status_label.text())
         viewer.close()
 
@@ -281,3 +282,41 @@ class DesignTests(unittest.TestCase):
         self.assertNotIn('raw-only-target',text)
         self.assertNotIn('"status"',text)
         self.assertIn('시간 초과',text)
+
+    def test_long_error_message_is_scrollable_without_losing_last_line(self):
+        w = self.window
+        self.show()
+        self.assertIsInstance(w.status_label,self.m.QTextEdit)
+        message = ('\\LSK_S010\\Study Folder\\19087\\Study\\MW: The system cannot find the file specified.\n'*20)+'마지막 오류 줄'
+        w.status_label.setText(message)
+        self.app.processEvents()
+        self.assertEqual(w.status_label.toPlainText(),message)
+        bar = w.status_label.verticalScrollBar()
+        self.assertGreater(bar.maximum(),0)
+        bar.setValue(bar.maximum())
+        w.status_label.setText(message)
+        self.assertEqual(bar.value(),bar.maximum())
+        w.status_label.setText('성공')
+        self.app.processEvents()
+        self.assertEqual(w.status_label.verticalScrollBar().maximum(),0)
+        self.assertLess(w.status_label.height(),50)
+
+    def test_disabled_buttons_have_muted_backgrounds_in_both_themes(self):
+        w = self.window
+        self.show()
+        for mode in ('light','dark'):
+            w.apply_theme(mode)
+            for button in (w.btn_request,w.btn_run_execute,w.btn_manual,w.btn_stop,w.btn_clear_log):
+                button.setEnabled(False)
+                self.app.processEvents()
+                pixel = button.grab().toImage().pixelColor(2,button.height()//2).name()
+                self.assertEqual(pixel,self.m.THEMES[mode]['badge'],(mode,button.text()))
+            w.btn_request.setEnabled(True)
+            self.app.processEvents()
+            pixel = w.btn_request.grab().toImage().pixelColor(6,w.btn_request.height()//2).name()
+            self.assertEqual(pixel,self.m.THEMES[mode]['accent'])
+
+    def test_replayed_result_explains_that_it_did_not_rerun(self):
+        result = dict(status='partially_succeeded',error_code='POWERSHELL_FAILED',replayed=True)
+        self.assertIn('이전 작업 결과',self.window._api_log_summary(result,'프로젝트 1987'))
+        self.assertIn('재실행 안 함',self.window._api_log_summary(result,'프로젝트 1987'))

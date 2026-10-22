@@ -5,8 +5,10 @@ from folder_grant_api.api.dependencies import get_session
 from folder_grant_api.api.routes.preview import create_plan
 from folder_grant_api.api.security import require_api_key
 from folder_grant_api.infrastructure.models import JobRecord
+from folder_grant_api.infrastructure.job_repository import DuplicateRequestError
 from folder_grant_api.schemas.access_job import AccessJobRequest, CancelJobRequest, JobResponse, JobStepResponse
 from folder_grant_api.services.job_service import (
+    JobNotRetryableError,
     JobNotCancellableError,
     JobNotFoundError,
     JobService,
@@ -24,6 +26,7 @@ router = APIRouter(
 def serialize_job(job: JobRecord, *, executor_mode: str, replayed: bool = False) -> JobResponse:
     recorded_mode = (job.result_payload or {}).get("executor_mode", executor_mode)
     return JobResponse(
+        original_request_id=job.request_payload.get("_original_request_id",job.request_id),
         job_id=job.id,
         request_id=job.request_id,
         replayed=replayed,
@@ -131,3 +134,21 @@ def cancel_access_job(
             status_code=409,
             detail={"code": "JOB_NOT_CANCELLABLE", "message": f"현재 상태에서는 취소할 수 없습니다: {exc}"},
         ) from exc
+
+
+@router.post("/{job_id}/retry",response_model=JobResponse,status_code=status.HTTP_202_ACCEPTED)
+def retry_access_job(job_id: str,payload: CancelJobRequest,background_tasks: BackgroundTasks,
+                     request: Request,response: Response,session: Session=Depends(get_session)) -> JobResponse:
+    try:
+        job,replayed = JobService(session).retry(job_id,payload.requested_by,request.app.state.settings.executor_mode)
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404,detail={"code":"JOB_NOT_FOUND","message":"작업을 찾을 수 없습니다."}) from exc
+    except JobNotRetryableError as exc:
+        raise HTTPException(status_code=409,detail={"code":"JOB_NOT_RETRYABLE","message":"PowerShell 실패·부분 성공 작업만 재실행할 수 있습니다."}) from exc
+    except DuplicateRequestError as exc:
+        raise HTTPException(status_code=409,detail={"code":"REQUEST_ID_CONFLICT","message":"재실행 요청번호 충돌입니다."}) from exc
+    if replayed:
+        response.status_code=status.HTTP_200_OK
+    else:
+        background_tasks.add_task(execute_job,request.app.state.session_factory,request.app.state.settings,job.id)
+    return serialize_job(job,executor_mode=request.app.state.settings.executor_mode,replayed=replayed)
