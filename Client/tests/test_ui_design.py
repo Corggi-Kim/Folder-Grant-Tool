@@ -66,11 +66,12 @@ class DesignTests(unittest.TestCase):
     def test_connection_strip_does_not_invent_live_connectivity_or_executor_mode(self):
         w = self.window
         self.assertIn('미확인',w.api_status_label.text())
-        self.assertIn('미확인',w.execution_mode_label.text())
+        self.assertFalse(hasattr(w,'execution_mode_label'))
+        self.assertIsNone(w._executor_mode)
         w.current_row = self.fixture.row()
         w._on_api_progress(dict(job_id='J',status='running',executor_mode='mock',steps=[]))
         self.assertIn('연결됨',w.api_status_label.text())
-        self.assertIn('모의',w.execution_mode_label.text())
+        self.assertEqual(w._executor_mode,'mock')
 
     def test_both_palettes_and_log_collapse_preserve_state(self):
         w = self.window
@@ -154,7 +155,7 @@ class DesignTests(unittest.TestCase):
         viewer = self.m.NewItemsViewer(w)
         viewer.set_data(['프로젝트코드','프로젝트명'],[['26-012','Test']])
         viewer._on_project_result(0,dict(status='succeeded',executor_mode='powershell'))
-        self.assertIn('실제',w.execution_mode_label.text())
+        self.assertEqual(w._executor_mode,'powershell')
         self.assertIn('연결됨',w.api_status_label.text())
         viewer.close()
 

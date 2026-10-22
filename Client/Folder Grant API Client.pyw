@@ -4163,10 +4163,9 @@ class AccessManager(QMainWindow):
         self.api_status_label = QLabel('○  API 미확인')
         self.bus_status_label = QLabel('○  BUS 미연결')
         self.server_label = QLabel('—'); self.server_label.setObjectName('mutedLabel')
-        self.execution_mode_label = QLabel('실행 모드 미확인'); self.execution_mode_label.setObjectName('modeBadge')
         for widget in (self.api_status_label,self.bus_status_label,self.server_label):
             connection.addWidget(widget)
-        connection.addStretch(); connection.addWidget(self.execution_mode_label)
+        connection.addStretch()
         main.addWidget(self.connection_bar)
 
         self.tabs = WorkspaceTabBar(); self.tabs.setObjectName('workspaceTabs')
@@ -5784,11 +5783,7 @@ class AccessManager(QMainWindow):
         self.bus_status_label.setStyleSheet(f"color:{t['green'] if bus_ok else t['muted']};")
         parsed = urlsplit(getattr(self,'api_config',{}).get('base_url',DEFAULT_API_URL))
         self.server_label.setText(parsed.netloc or '—')
-        mode = self._executor_mode if api_ok else None
-        self.execution_mode_label.setText({'powershell':'●  실제 실행 모드','mock':'●  모의 실행 모드'}.get(mode,'실행 모드 미확인'))
-        self.execution_mode_label.setProperty('mode',mode or 'unknown')
-        self.execution_mode_label.style().unpolish(self.execution_mode_label)
-        self.execution_mode_label.style().polish(self.execution_mode_label)
+
 
 
     def _set_api_connection_state(self,connected,result=None):
