@@ -131,7 +131,7 @@ class DesignTests(unittest.TestCase):
     def test_theme_switch_persists_choice_in_both_directions(self):
         w = self.window
         for mode in ('dark','light'):
-            w.theme_switch.setChecked(mode=='dark')
+            w._toggle_theme()
             self.assertEqual(w.current_theme,mode)
             with open(self.m.CONF_FILE,encoding='utf-8') as handle:
                 self.assertEqual(json.load(handle)['theme'],mode)
@@ -173,7 +173,7 @@ class DesignTests(unittest.TestCase):
         v = w._newdlg
         pos = lambda widget:widget.mapTo(w,self.m.QPoint(0,0))
         self.assertEqual(v.btn_refresh.text(),'BUS 신규조회')
-        self.assertEqual(v.btn_manual.text(),'수동추가')
+        self.assertEqual(v.btn_manual.text(),'수동 추가')
         self.assertEqual(v.btn_create.text(),'선택실행')
         self.assertFalse(hasattr(v,'btn_close'))
         self.assertLess(pos(v.toolbar).y(),pos(v.tbl).y())
@@ -183,3 +183,20 @@ class DesignTests(unittest.TestCase):
         self.assertFalse(v.btn_stop.isEnabled())
         w.tabs.setCurrentIndex(0)
         self.assertTrue(v.actions_bar.isHidden())
+
+    def test_toolbar_button_order_and_primary_lookup_actions(self):
+        w = self.window
+        self.assertFalse(hasattr(w,'theme_switch'))
+        self.assertEqual(w.btn_manual.text(),'수동 입력')
+        self.assertNotEqual(w.btn_manual.objectName(),'primaryButton')
+        self.assertEqual(w.btn_request.objectName(),'primaryButton')
+        self.show()
+        self.assertLess(w.btn_manual.x(),w.btn_file.x())
+        self.assertLess(w.btn_file.x(),w.btn_request.x())
+        w.ensure_bus_session_async = lambda purpose,callback:None
+        w.open_new_viewer()
+        self.app.processEvents()
+        v = w._newdlg
+        self.assertLess(v.btn_manual.x(),v.btn_refresh.x())
+        self.assertEqual(v.btn_refresh.objectName(),'primaryButton')
+        self.assertNotEqual(v.btn_manual.objectName(),'primaryButton')
