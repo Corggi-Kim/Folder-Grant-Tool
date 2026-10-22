@@ -2609,20 +2609,24 @@ class NewItemsViewer(QDialog):
         self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tbl.horizontalHeader().setStretchLastSection(True)
 
-        btns = QHBoxLayout()
-        self.btn_manual = QPushButton("수동 추가")
-        self.btn_create = QPushButton("선택 생성")
-        self.btn_refresh = QPushButton("BUS 신규 조회")
-        self.btn_close = QPushButton("권한 요청으로")
-        self.btn_close.clicked.connect(lambda:self.host.tabs.setCurrentIndex(0) if not self.isWindow() else self.accept())
-        self.btn_create.clicked.connect(self._on_create_clicked)
+        lay.setContentsMargins(0,0,0,0)
+        lay.setSpacing(0)
+        self.toolbar = QWidget(); self.toolbar.setObjectName('requestToolbar')
+        top = QHBoxLayout(self.toolbar); top.setContentsMargins(15,12,12,12)
+        heading = QLabel('요청 목록'); heading.setObjectName('sectionTitle')
+        top.addWidget(heading); top.addStretch()
+        self.btn_refresh = QPushButton('BUS 신규조회')
+        self.btn_manual = QPushButton('수동추가'); self.btn_manual.setObjectName('primaryButton')
+        top.addWidget(self.btn_refresh); top.addWidget(self.btn_manual)
         self.btn_manual.clicked.connect(self._on_manual_clicked)
-        btns.addStretch()
-        btns.addWidget(self.btn_manual)
-        btns.addWidget(self.btn_create)
-        btns.addWidget(self.btn_refresh)
-        btns.addWidget(self.btn_close)
-        lay.addWidget(self.tbl); lay.addLayout(btns)
+        lay.addWidget(self.toolbar); lay.addWidget(self.tbl,1)
+        self.tbl.verticalHeader().setDefaultSectionSize(47)
+        self.tbl.horizontalHeader().setFixedHeight(43)
+        self.tbl.setAlternatingRowColors(False)
+        self.actions_bar = QWidget(); self.actions_bar.setObjectName('actionsBar')
+        btns = QHBoxLayout(self.actions_bar); btns.setContentsMargins(20,12,20,10)
+        self.btn_create = QPushButton('선택실행'); self.btn_create.setObjectName('primaryButton')
+        self.btn_create.clicked.connect(self._on_create_clicked)
 
         self.status_lbl = QLabel("")
         self.status_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -2647,9 +2651,11 @@ class NewItemsViewer(QDialog):
         self.chk_auto_complete.setChecked(True)
         self.btn_stop = QPushButton('중지')
         self.btn_stop.clicked.connect(lambda: self.worker.stop() if self.worker else None)
-        btns.insertWidget(0,self.chk_dry)
-        btns.insertWidget(1,self.chk_auto_complete)
-        btns.insertWidget(2,self.btn_stop)
+        self.chk_dry.hide()
+        btns.addWidget(self.chk_auto_complete); btns.addStretch()
+        btns.addWidget(self.btn_create); btns.addWidget(self.btn_stop)
+        self.btn_stop.setObjectName('dangerButton')
+        self.btn_stop.setEnabled(False)
 
     def _set_busy(self, on: bool, msg: str = ""):
         self.status_lbl.setText(msg or "")
@@ -2657,7 +2663,6 @@ class NewItemsViewer(QDialog):
         self.btn_manual.setEnabled(not on)
         self.btn_create.setEnabled(not on)
         self.btn_refresh.setEnabled(not on)
-        self.btn_close.setEnabled(not on)
         self.chk_dry.setEnabled(not on)
         self.chk_auto_complete.setEnabled(not on)
         self.btn_stop.setEnabled(on)
@@ -3625,7 +3630,7 @@ class AccessManager(QMainWindow):
         QTabBar::tab {{background:transparent;color:{t['text']};padding:15px 22px 13px;min-height:24px;border-bottom:3px solid transparent;}}
         QTabBar::tab:selected {{color:{t['accent']};border-bottom-color:{t['accent']};}}
         QTabBar::tab:disabled {{color:{t['disabled']};}}
-        QWidget#requestToolbar {{background:{t['panel']};border:1px solid {t['border']};border-top-left-radius:6px;border-top-right-radius:6px;}}
+        QWidget#requestToolbar {{background:{t['bg']};border:0;}}
         QLabel#sectionTitle {{font-size:16px;font-weight:700;}}
         QTableWidget {{background:{t['panel']};alternate-background-color:{t['bg']};border:1px solid {t['border']};border-radius:5px;gridline-color:{t['grid']};selection-background-color:{t['select']};selection-color:{t['text']};}}
         QTableWidget QWidget {{background:transparent;}}
@@ -3886,7 +3891,7 @@ class AccessManager(QMainWindow):
         self.table.setAlternatingRowColors(False)
         self.table.setShowGrid(True)
         self.table.setWordWrap(False)
-        self.table.verticalHeader().hide()
+        self.table.verticalHeader().show()
         self.table.verticalHeader().setDefaultSectionSize(47)
         self.table.horizontalHeader().setFixedHeight(43)
         self.table.horizontalHeader().setMinimumSectionSize(30)
@@ -4159,6 +4164,9 @@ class AccessManager(QMainWindow):
         # Register the one persistent viewer before asynchronous session preparation.
         self._newdlg = NewItemsViewer(self)
         self._newdlg.setWindowFlags(Qt.Widget)
+        main_layout = self.centralWidget().layout()
+        main_layout.insertWidget(main_layout.indexOf(self.actions_bar)+1,self._newdlg.actions_bar)
+        self._newdlg.actions_bar.setVisible(self.tabs.currentIndex()==1)
         self.project_page_layout.addWidget(self._newdlg)
         self._newdlg.btn_refresh.clicked.connect(self._load_new_items)
         self._newdlg.show()
@@ -5241,6 +5249,10 @@ class AccessManager(QMainWindow):
     def _switch_workspace(self,index):
         self.workspaces.setCurrentIndex(index)
         self.actions_bar.setVisible(index==0)
+        self.summary_label.setVisible(index==0)
+        viewer = getattr(self,'_newdlg',None)
+        if viewer is not None:
+            viewer.actions_bar.setVisible(index==1)
         if index==1:
             self.open_new_viewer()
 

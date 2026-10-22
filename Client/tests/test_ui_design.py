@@ -98,7 +98,7 @@ class DesignTests(unittest.TestCase):
         self.assertFalse(w._newdlg.isWindow())
         w.apply_theme('dark')
         self.assertEqual(w._newdlg.styleSheet(),'')
-        w._newdlg.btn_close.click()
+        w.tabs.setCurrentIndex(0)
         self.assertEqual(w.tabs.currentIndex(),0)
         self.assertIsNotNone(w._newdlg)
 
@@ -164,3 +164,22 @@ class DesignTests(unittest.TestCase):
             with self.subTest(label=tabs.tabText(index)):
                 needed = tabs.fontMetrics().horizontalAdvance(tabs.tabText(index))+44
                 self.assertGreaterEqual(tabs.tabRect(index).width(),needed)
+
+    def test_project_workspace_matches_request_toolbar_and_bottom_actions(self):
+        w = self.window
+        w.ensure_bus_session_async = lambda purpose,callback:None
+        w.open_new_viewer()
+        self.show()
+        v = w._newdlg
+        pos = lambda widget:widget.mapTo(w,self.m.QPoint(0,0))
+        self.assertEqual(v.btn_refresh.text(),'BUS 신규조회')
+        self.assertEqual(v.btn_manual.text(),'수동추가')
+        self.assertEqual(v.btn_create.text(),'선택실행')
+        self.assertFalse(hasattr(v,'btn_close'))
+        self.assertLess(pos(v.toolbar).y(),pos(v.tbl).y())
+        self.assertGreater(pos(v.actions_bar).y(),pos(w.logs_panel).y()+w.logs_panel.height()-5)
+        self.assertTrue(w.table.verticalHeader().isHidden()==False)
+        self.assertFalse(v.tbl.verticalHeader().isHidden())
+        self.assertFalse(v.btn_stop.isEnabled())
+        w.tabs.setCurrentIndex(0)
+        self.assertTrue(v.actions_bar.isHidden())
