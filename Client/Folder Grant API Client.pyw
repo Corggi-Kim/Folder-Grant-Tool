@@ -3714,7 +3714,7 @@ class AccessManager(QMainWindow):
         QWidget#requestToolbar {{background:{t['bg']};border:0;}}
         QWidget#projectDetailFields, QScrollArea#projectDetailScroll {{background:{t['panel']};}}
         QWidget#projectDetailFields QLabel {{background:transparent;}}
-        QLabel#requestCountBadge {{background:{t['accent']};color:white;border:0;border-radius:12px;padding:0 7px;font-size:12px;font-weight:600;}}
+        QLabel#requestCountBadge {{background:#ef3340;color:white;border:0;border-radius:5px;padding:0;font-size:11px;font-weight:600;}}
         QLabel#sectionTitle {{font-size:16px;font-weight:700;}}
         QTableWidget {{background:{t['panel']};alternate-background-color:{t['bg']};border:1px solid {t['border']};border-radius:5px;gridline-color:{t['grid']};selection-background-color:{t['select']};selection-color:{t['text']};}}
         QTableWidget QWidget {{background:transparent;}}
@@ -3929,12 +3929,14 @@ class AccessManager(QMainWindow):
         tab_layout.setContentsMargins(18,0,18,0); tab_layout.setSpacing(0)
         tab_layout.addWidget(self.tabs)
         tab_layout.addStretch()
-        self.request_count_badge = QLabel('0')
-        self.request_count_badge.setObjectName('requestCountBadge')
-        self.request_count_badge.setAlignment(Qt.AlignCenter)
-        self.request_count_badge.setMinimumWidth(26)
-        self.request_count_badge.setFixedHeight(24)
-        tab_layout.addWidget(self.request_count_badge)
+        self.tab_count_badges = []
+        for index in range(self.tabs.count()):
+            holder = QWidget(); holder.setFixedSize(26,28)
+            holder.setAttribute(Qt.WA_TransparentForMouseEvents)
+            badge = QLabel('0',holder); badge.setObjectName('requestCountBadge')
+            badge.setAlignment(Qt.AlignCenter); badge.setGeometry(0,0,26,18)
+            self.tabs.setTabButton(index,QTabBar.RightSide,holder)
+            self.tab_count_badges.append(badge)
         main.addWidget(tab_row)
         self.workspaces = QStackedWidget()
         self.request_page = QWidget()
@@ -4201,11 +4203,10 @@ class AccessManager(QMainWindow):
 
     def _refresh_request_count_badge(self):
         counts = getattr(self,'_notif_counts',{})
-        if self.tabs.currentIndex()==1:
-            total = counts.get('신규미완료',0)
-        else:
-            total = sum(counts.get(key,0) for key in ('진행-부여','진행-제거','종료-부여','종료-제거'))
-        self.request_count_badge.setText(str(total))
+        totals = [sum(counts.get(key,0) for key in ('진행-부여','진행-제거','종료-부여','종료-제거')),
+                  counts.get('신규미완료',0)]
+        for badge,total in zip(self.tab_count_badges,totals):
+            badge.setText('99+' if total>99 else str(total))
 
     def _on_watcher_ready(self, ok: bool, msg: str):
         self._refresh_connection_strip()

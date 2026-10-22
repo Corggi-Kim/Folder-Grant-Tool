@@ -232,13 +232,22 @@ class DesignTests(unittest.TestCase):
     def test_request_count_badge_is_scoped_and_settings_detail_is_preserved(self):
         w = self.window
         w._on_counts_ready({'신규미완료':7,'진행-부여':2,'진행-제거':3,'종료-부여':4,'종료-제거':1})
-        self.assertEqual(w.request_count_badge.text(),'10')
+        self.assertEqual(w.tab_count_badges[0].text(),'10')
         self.assertFalse(hasattr(w,'badge_notif'))
         self.assertIn('BUS 요청 알림',[action.text() for action in w.settings_button.menu().actions()])
         w.ensure_bus_session_async = lambda purpose,callback:None
         w.tabs.setCurrentIndex(1)
-        self.assertEqual(w.request_count_badge.text(),'7')
+        self.assertEqual(w.tab_count_badges[1].text(),'7')
         w._on_counts_ready({'신규미완료':9})
-        self.assertEqual(w.request_count_badge.text(),'9')
+        self.assertEqual(w.tab_count_badges[1].text(),'9')
         w.tabs.setCurrentIndex(0)
-        self.assertEqual(w.request_count_badge.text(),'0')
+        self.assertEqual(w.tab_count_badges[0].text(),'0')
+
+    def test_count_badges_are_attached_to_each_tab(self):
+        w = self.window
+        self.show()
+        for index,badge in enumerate(w.tab_count_badges):
+            self.assertIs(badge.parent(),w.tabs.tabButton(index,self.m.QTabBar.RightSide))
+            point = badge.mapTo(w.tabs,self.m.QPoint(0,0))
+            self.assertTrue(w.tabs.tabRect(index).contains(point))
+            self.assertLess(point.y(),w.tabs.tabRect(index).center().y())
