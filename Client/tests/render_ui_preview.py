@@ -40,6 +40,7 @@ def render():
             w._set_row_metadata(index,dict(source='bus',request_id=f'BUS-sample-{index}',result=result,bus_done=status=='BUS 완료'))
             w.table.item(index,w.COL_STATUS).setText(status)
             w._get_checkbox(index).setChecked(index<2)
+        w._mark_list_loaded('access',w.table.rowCount())
         w.log.setPlainText('10:21:04  요청 검증 완료\n10:21:05  그룹 권한 적용 완료\n10:21:06  폴더 권한 적용 중…')
         w.table.setCurrentCell(0,w.COL_PROJ)
         w.btn_stop.setEnabled(True)
@@ -55,8 +56,25 @@ def render():
             w.ensure_bus_session_async = lambda purpose,callback:None
             w.open_new_viewer()
             w._newdlg.set_data(['프로젝트코드','프로젝트명','신청자','요청일'],[['26-012','표준 프로젝트','홍길동','2026-10-22'],['26-019','신규 연구','김연구','2026-10-22']])
+            w._mark_list_loaded('project',w._newdlg.tbl.rowCount())
             app.processEvents()
             w.grab().save(str(output/'client-projects-v1.1.0.png'))
+        if '--startup' in __import__('sys').argv:
+            from PyQt5.QtTest import QTest
+            w.hide()
+            dialog = m.StartupLoadingDialog(w)
+            dialog.show()
+            frames = Path('/tmp/fgt-startup-frames'); frames.mkdir(exist_ok=True)
+            frame = 0
+            for stage in range(4):
+                dialog._stage(stage)
+                for tick in range(12):
+                    QTest.qWait(50)
+                    dialog.grab().save(str(frames/f'{frame:03}.png'))
+                    frame += 1
+                if stage==1:
+                    dialog.grab().save(str(output/'client-startup-v1.1.0.png'))
+            dialog.deadline.stop(); dialog.hide()
         print(json.dumps(dict(size=[w.width(),w.height()],table=[w.table.width(),w.table.height()],
                               detail_width=w.detail_panel.width(),output=str(output)),ensure_ascii=False))
     finally:
