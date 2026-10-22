@@ -29,39 +29,57 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem, QAbstractItemView, QVBoxLayout, QWidget, QTextEdit, QHBoxLayout,
     QLabel, QHeaderView, QCheckBox, QMenu, QToolButton, QMessageBox, QStyleOptionButton,
     QStyle, QDialog, QLineEdit, QComboBox, QDialogButtonBox, QFormLayout, QStatusBar,
-    QSpinBox, QProgressBar, QAbstractButton
+    QSpinBox, QProgressBar, QAbstractButton, QTabBar, QStackedWidget, QAction, QStyledItemDelegate, QStyleOptionViewItem
 )
-from PyQt5.QtGui import QFont, QGuiApplication, QKeySequence, QPainter, QTextOption, QTextCursor, QPixmap, QIcon
+from PyQt5.QtGui import QFont, QGuiApplication, QKeySequence, QPainter, QTextOption, QTextCursor, QPixmap, QIcon, QColor, QPen, QPainterPath
 from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QTimer, QPoint, QSize
 from openpyxl import load_workbook
 
 APP_NAME = "Folder Grant API Client"
-APP_VERSION = "1.0.0"  #구조변경, 기능추가/수정, 오류/버그수정
-APP_BUILD = "2026-10-08"
+APP_VERSION = "1.1.0"  #구조변경, 기능추가/수정, 오류/버그수정
+APP_BUILD = "2026-10-22"
 APP_VERSION_STR = f"v{APP_VERSION}"
 
-THEMES = {
-    "light": {
-        "bg": "#f5f5f5",
-        "btn": "#d6dde0",
-        "hover": "#b0bec5",
-        "press": "#78909c",
-        "panel": "#eceff1",
-        "panel_border": "#cfd8dc",
-        "select": "#d6e1e7",
-        "alt": "#f6f9fb",
-    },
-    "dark":  {
-        "bg": "#2f2f2f",
-        "btn": "#424242",
-        "hover": "#616161",
-        "press": "#757575",
-        "panel": "#3a3a3a",
-        "panel_border": "#505050",
-        "select": "#4a5a66",
-        "alt": "#343838",
-    },
-}
+THEMES = {'light': {'bg': '#f4f6fa',
+           'panel': '#ffffff',
+           'header': '#f5f7fb',
+           'text': '#1f2937',
+           'muted': '#69788f',
+           'border': '#dce3ec',
+           'grid': '#e9edf4',
+           'button_border': '#b9c6d8',
+           'accent': '#2563eb',
+           'accent_hover': '#1d4ed8',
+           'select': '#e0ebff',
+           'hover': '#f0f5ff',
+           'badge': '#edf1f7',
+           'blue_bg': '#eaf2ff',
+           'green': '#16a34a',
+           'amber': '#ce8109',
+           'amber_bg': '#fff6e6',
+           'amber_border': '#f1d6a5',
+           'red': '#e5484d',
+           'disabled': '#9da8b8'},
+ 'dark': {'bg': '#151b26',
+          'panel': '#1e2634',
+          'header': '#202b3b',
+          'text': '#e5eaf2',
+          'muted': '#a0aec2',
+          'border': '#334155',
+          'grid': '#2e3a4a',
+          'button_border': '#5a6b82',
+          'accent': '#3b82f6',
+          'accent_hover': '#5292ff',
+          'select': '#284468',
+          'hover': '#29384d',
+          'badge': '#2b3749',
+          'blue_bg': '#243b59',
+          'green': '#22c55e',
+          'amber': '#f5b644',
+          'amber_bg': '#3b3022',
+          'amber_border': '#73592e',
+          'red': '#fb7185',
+          'disabled': '#6c788c'}}
 
 HELP_TEXT = r"""[Folder Grant API Client 사용 안내]
 
@@ -69,19 +87,20 @@ HELP_TEXT = r"""[Folder Grant API Client 사용 안내]
    설정 파일은 C:\FGT\conf\api_client.json이며 API Key가 평문 저장됩니다.
 2) 설정: 기존 BUS 로그인 계정을 입력합니다.
 3) 요청 확인: BUS 진행·종료 권한 요청을 조회합니다.
-4) 신규 확인: BUS 프로젝트 생성 요청을 조회합니다. 수동 추가도 가능합니다.
+4) 신규 프로젝트 탭: BUS 프로젝트 생성 요청을 조회합니다. 수동 추가도 가능합니다.
 5) 파일 선택 또는 수동 입력: API 작업용 요청을 추가합니다. BUS 완료 대상은 아닙니다.
-6) 실행: 서버 API에 권한 작업을 등록하고 최종 Job 결과를 표시합니다.
+6) 선택 실행: 서버 API에 권한 작업을 등록하고 최종 Job 결과를 표시합니다.
    클라이언트에서는 AD·폴더 권한 명령을 실행하지 않습니다.
-7) Dry Run: 서버 Preview만 호출합니다. 실제 Job과 BUS 완료 처리를 실행하지 않습니다.
-8) 완료 처리: BUS 요청이며 서버 PowerShell 작업이 실제 성공한 경우에만 허용합니다.
+7) 미리보기: 서버 Preview만 호출합니다. 실제 Job과 BUS 완료 처리를 실행하지 않습니다.
+8) BUS 완료 재확인: 서버 상태를 다시 조회하고 실제 PowerShell 성공인 경우에만 허용합니다.
    Mock·Preview·부분 성공·실패·취소는 BUS 완료 대상에서 제외됩니다.
    서버 성공 후 BUS 완료가 실패했으면 완료 처리만 다시 실행하세요.
 9) 중지: 새 작업 등록을 멈추고 실행 Job에 취소를 요청합니다.
    이미 실행 중인 서버 PowerShell 단계는 즉시 종료되지 않을 수 있습니다.
 10) BUS 조회 행을 편집하면 수동 요청으로 전환합니다. 기존 성공 결과는 무효화됩니다.
 11) 로그: C:\FGT\Log\access_YYYYMMDD.log, 다운로드: C:\FGT\ef
-12) 테마는 상단 버튼으로 전환합니다. 상세 실행·검증 절차는 Client/README.md를 확인하세요.
+12) 테마는 상단 아이콘/스위치로 전환합니다. 설정은 톱니바퀴 메뉴에 있습니다.
+13) 이름·부서·Role 편집은 톱니바퀴의 상세 열 표시를 사용합니다. 상세 절차는 Client/README.md를 확인하세요.
 """
 
 
@@ -698,6 +717,7 @@ class ApiSettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle('API 연결 설정')
         self.resize(500,220)
+        self.connection_verified = False
         self.thread = None
         self.task = None
         layout = QFormLayout(self)
@@ -716,6 +736,8 @@ class ApiSettingsDialog(QDialog):
         self.buttons.accepted.connect(self._save)
         self.buttons.rejected.connect(self.reject)
         layout.addRow(self.buttons)
+        self.url.textChanged.connect(lambda text:setattr(self,'connection_verified',False))
+        self.key.textChanged.connect(lambda text:setattr(self,'connection_verified',False))
 
     def values(self):
         return dict(base_url=self.url.text().strip().rstrip('/'),api_key=self.key.text().strip())
@@ -737,7 +759,7 @@ class ApiSettingsDialog(QDialog):
         self.task = ApiConnectionTask(client)
         self.task.moveToThread(self.thread)
         self.thread.started.connect(self.task.run)
-        self.task.succeeded.connect(lambda result:self.message.setText('API 연결 및 인증 확인 성공'))
+        self.task.succeeded.connect(self._connection_succeeded)
         self.task.failed.connect(self.message.setText)
         self.task.finished.connect(self.task.deleteLater)
         self.task.finished.connect(self.thread.quit,type=Qt.DirectConnection)
@@ -746,8 +768,13 @@ class ApiSettingsDialog(QDialog):
         self.check.setEnabled(False)
         self.buttons.setEnabled(False)
         self.url.setEnabled(False); self.key.setEnabled(False)
+        self.connection_verified = False
         self.message.setText('연결 확인 중…')
         self.thread.start()
+
+    def _connection_succeeded(self,result):
+        self.connection_verified = True
+        self.message.setText('API 연결 및 인증 확인 성공')
 
     def _connection_finished(self):
         self.thread = None; self.task = None
@@ -2567,6 +2594,7 @@ class ManualNewRequestDialog(QDialog):
 class NewItemsViewer(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.host = parent
         self.setWindowTitle("신규 폴더 생성요청 목록")
         self.resize(800, 520)
 
@@ -2583,10 +2611,10 @@ class NewItemsViewer(QDialog):
 
         btns = QHBoxLayout()
         self.btn_manual = QPushButton("수동 추가")
-        self.btn_create = QPushButton("자동 생성")
-        self.btn_refresh = QPushButton("↻ 새로고침")
-        self.btn_close = QPushButton("닫기")
-        self.btn_close.clicked.connect(self.accept)
+        self.btn_create = QPushButton("선택 생성")
+        self.btn_refresh = QPushButton("BUS 신규 조회")
+        self.btn_close = QPushButton("권한 요청으로")
+        self.btn_close.clicked.connect(lambda:self.host.tabs.setCurrentIndex(0) if not self.isWindow() else self.accept())
         self.btn_create.clicked.connect(self._on_create_clicked)
         self.btn_manual.clicked.connect(self._on_manual_clicked)
         btns.addStretch()
@@ -2790,8 +2818,8 @@ class NewItemsViewer(QDialog):
 
 
     def _on_create_clicked(self):
-        parent = self.parent()
-        if parent._closing or self.worker_thread is not None or parent.api_thread is not None or parent.session.is_busy():
+        parent = self.host
+        if parent._closing or parent._waiting_for_bus or self.worker_thread is not None or parent.api_thread is not None or parent.session.is_busy():
             return
         if not parent.api_config.get('api_key'):
             parent._open_api_settings()
@@ -2844,6 +2872,8 @@ class NewItemsViewer(QDialog):
 
 
     def _on_project_result(self,row,result):
+        verified = result.get('executor_mode') in {'mock','powershell'} or result.get('status')=='preview'
+        self.host._set_api_connection_state(verified,result)
         col = self._hidx.get('프로젝트코드',-1)
         item = self.tbl.item(row,col) if col >= 0 else None
         if item:
@@ -2851,14 +2881,14 @@ class NewItemsViewer(QDialog):
             meta.update(result=result,bus_done=result.get('bus_done',False))
             item.setData(Qt.UserRole,meta)
             item.setToolTip(json.dumps(result,ensure_ascii=False,indent=2))
-        self.parent()._log('프로젝트 결과: '+json.dumps(result,ensure_ascii=False,indent=2))
+        self.host._log('프로젝트 결과: '+json.dumps(result,ensure_ascii=False,indent=2))
 
 
     def _project_thread_finished(self):
         self.worker = None
         self.worker_thread = None
         self._set_busy(False,self.status_lbl.text())
-        self.parent()._set_running_ui(False)
+        self.host._set_running_ui(False)
 
 
     def closeEvent(self,event):
@@ -2872,6 +2902,9 @@ class NewItemsViewer(QDialog):
     def reject(self):
         if self.worker_thread is not None:
             self.worker.stop()
+            return
+        if not self.isWindow():
+            self.host.tabs.setCurrentIndex(0)
             return
         super().reject()
 
@@ -3405,6 +3438,115 @@ class BadgeToolButton(QWidget):
             }}
         """)
 
+# Drawing helpers keep visual presentation separate from the API payload model.
+class RequestDelegate(QStyledItemDelegate):
+    def __init__(self,host):
+        super().__init__(host.table)
+        self.host = host
+
+    def paint(self,painter,option,index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt,index)
+        host = self.host
+        if index.column() == host.COL_LV2 and host.table.isColumnHidden(host.COL_LV3):
+            lv2 = host._get(index.row(),host.COL_LV2)
+            lv3 = host._get(index.row(),host.COL_LV3)
+            opt.text = f'{lv2} · {lv3}' if lv2 and lv3 else '—'
+            host.table.style().drawControl(QStyle.CE_ItemViewItem,opt,painter,host.table)
+            return
+        if index.column() != host.COL_STATUS:
+            super().paint(painter,opt,index)
+            return
+        text,tone = request_status_presentation(str(index.data() or ''))
+        opt.text = ''
+        host.table.style().drawControl(QStyle.CE_ItemViewItem,opt,painter,host.table)
+        theme = THEMES.get(host.current_theme,THEMES['light'])
+        colors = {'blue':theme['accent'],'green':theme['green'],'amber':theme['amber'],
+                  'red':theme['red'],'muted':theme['muted']}
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = option.rect
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(colors[tone]))
+        painter.drawEllipse(QPoint(rect.left()+15,rect.center().y()),4,4)
+        painter.setPen(QColor(theme['text']))
+        painter.setFont(option.font)
+        text_rect = rect.adjusted(28,0,-7,0)
+        painter.drawText(text_rect,Qt.AlignVCenter|Qt.AlignLeft,
+                         option.fontMetrics.elidedText(text,Qt.ElideRight,text_rect.width()))
+        painter.restore()
+
+
+def request_status_presentation(status):
+    if 'BUS 완료' == status:
+        return 'BUS 완료','green'
+    if '초과' in status or 'TIMEOUT' in status:
+        return '시간 초과','amber'
+    if '부분' in status:
+        return '부분 성공','amber'
+    if '실패' in status or '오류' in status:
+        return '확인 필요','red'
+    if '모의' in status:
+        return '모의 완료','muted'
+    if status == 'API 성공' or status.startswith('서버 성공'):
+        return '서버 성공','green'
+    if 'DryRun' in status or 'Preview' in status or '미리보기' in status:
+        return '미리보기','muted'
+    if '실행중' in status or '실행 중' in status:
+        return '실행 중','blue'
+    if '완료 처리중' in status:
+        return 'BUS 처리 중','blue'
+    if '취소' in status or '중지' in status:
+        return '중지됨','muted'
+    if status in {'대기',''}:
+        return '실행 대기','muted'
+    return status,'muted'
+
+
+def folder_mark(color,size=46):
+    pixmap = QPixmap(size,size)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setPen(QPen(QColor(color),3,Qt.SolidLine,Qt.RoundCap,Qt.RoundJoin))
+    painter.setBrush(Qt.NoBrush)
+    path = QPainterPath()
+    path.moveTo(6,11); path.lineTo(17,11); path.lineTo(22,17)
+    path.lineTo(size-6,17); path.lineTo(size-6,size-8)
+    path.lineTo(6,size-8); path.closeSubpath()
+    painter.drawPath(path)
+    painter.end()
+    return pixmap
+
+
+def themed_icon(name,color):
+    pixmap = QIcon(resource_path('assets/'+name+'.svg')).pixmap(24,24)
+    painter = QPainter(pixmap)
+    painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+    painter.fillRect(pixmap.rect(),QColor(color))
+    painter.end()
+    return QIcon(pixmap)
+
+
+class ThemeSwitch(QCheckBox):
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(36,22)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def hitButton(self,position):
+        return self.rect().contains(position)
+
+    def paintEvent(self,event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor('#3b82f6' if self.isChecked() else '#4b8df8'))
+        painter.drawRoundedRect(1,2,34,18,9,9)
+        painter.setBrush(QColor('#ffffff'))
+        painter.drawEllipse(19 if self.isChecked() else 3,4,14,14)
+
+
 class AccessManager(QMainWindow):
     trigger_new_download = pyqtSignal()
     trigger_session_start = pyqtSignal()
@@ -3444,144 +3586,94 @@ class AccessManager(QMainWindow):
         dlg.resize(720, 560)
         dlg.exec_()
 
-    def apply_theme(self, mode: str):
-        theme = THEMES.get(mode, THEMES["light"])
-        text_color = "#111111" if mode == "light" else "#E0E0E0"
-        disabled_bg = "rgba(176,190,197,0.45)" if mode == "light" else "rgba(66,66,66,0.50)"
-        disabled_tx = "#9aa3a8"
-        disabled_border = "#c7c7c7" if mode == "light" else "#5a5a5a"
-
-        qss = f"""
-        QWidget {{
-            background-color: {theme['bg']};
-            color: {text_color};
-        }}
-
-        QPushButton {{
-            background-color: {theme['btn']};
-            border: 1px solid #9e9e9e;
-            border-radius: 6px;
-            padding: 6px 12px;
-            color: {text_color};
-        }}
-        QPushButton:hover {{
-            background-color: {theme['hover']};
-        }}
-        QPushButton:pressed {{
-            background-color: {theme['press']};
-        }}
-
-        QPushButton:disabled,
-        QPushButton:disabled:hover,
-        QPushButton:disabled:pressed {{
-            background-color: rgba(176,190,197,0.45);
-            color: #9aa3a8;
-            border: 1px solid {theme['panel_border']};
-        }}
-
-        QToolButton:disabled {{
-            color: #9aa3a8;
-        }}
-
-        QLineEdit:disabled,
-        QComboBox:disabled,
-        QCheckBox:disabled,
-        QTextEdit:disabled {{
-            color: #9aa3a8;
-            background-color: transparent;
-        }}
-
-        QHeaderView::section {{
-            background-color: {theme['btn']};
-            color: {text_color};
-            border: 0px;
-            padding: 4px 6px;
-        }}
-
-        QHeaderView::section:vertical {{
-            background-color: {theme['btn']};
-            color: {text_color};
-            border: 0px;
-            padding: 0px 6px;
-            border-radius: 0px;
-        }}
-
-        QTableCornerButton::section {{
-            background-color: {theme['btn']};
-            border: 0px;
-            padding: 0px;
-            border-top-left-radius: 8px;
-        }}
-
-        QTableView, QTableWidget, QTextEdit {{
-            background: {theme['panel']};
-            border: 1px solid {theme['panel_border']};
-            border-radius: 8px;
-            selection-background-color: {theme['select']};
-            selection-color: {text_color};
-        }}
-
-        QTableView, QTableWidget {{
-            gridline-color: {theme['panel_border']};
-            alternate-background-color: {theme['alt']};
-        }}
-
-        QTableWidget::item, QTableView::item {{
-            padding: 4px 6px;
-        }}
-
-        QAbstractScrollArea {{
-            background: transparent;
-        }}
-
-        QMenu {{
-            background-color: {theme['bg']};
-            color: {text_color};
-            border: 1px solid #9e9e9e;
-            border-radius: 6px;
-            padding: 4px;
-        }}
-        QMenu::separator {{
-            height: 1px;
-            background: rgba(0,0,0,0.15);
-            margin: 4px 8px;
-        }}
-        QMenu::item {{
-            padding: 6px 12px;
-            border-radius: 4px;
-            background: transparent;
-        }}
-        QMenu::item:selected {{
-            background: {theme['hover']};
-            color: {text_color};
-        }}
-
-        QComboBox QAbstractItemView {{
-            background-color: {theme['bg']};
-            color: {text_color};
-            selection-background-color: {theme['hover']};
-            selection-color: {text_color};
-            outline: 0;
-        }}
-
-        QHeaderView::section:horizontal:last {{
-            border-top-right-radius: 8px;
-        }}
-
-        QHeaderView::section:horizontal:first {{
-            border-top-left-radius: 0px;
-        }}
-        """
-        self.setStyleSheet(qss)
+    def apply_theme(self,mode):
+        mode = mode if mode in THEMES else 'light'
         self.current_theme = mode
-        self._refresh_theme_button_emoji()
+        t = THEMES[mode]
+        qss = f'''
+        QWidget {{background:{t['bg']};color:{t['text']};font-size:13px;}}
+        QLabel,QCheckBox,QToolButton {{background:transparent;}}
+        QWidget#appHeader,QWidget#connectionBar {{background:{t['panel']};border-bottom:1px solid {t['border']};}}
+        QLabel#brandTitle {{font-size:23px;font-weight:700;}}
+        QLabel#brandSubtitle {{font-size:12px;}}
+        QLabel#mutedLabel,QLabel#summaryLabel {{color:{t['muted']};font-size:12px;}}
+        QLabel#versionBadge {{background:{t['badge']};border:1px solid {t['border']};border-radius:5px;padding:4px 9px;font-size:11px;font-weight:600;}}
+        QLabel#modeBadge {{background:{t['badge']};color:{t['muted']};border:1px solid {t['border']};border-radius:5px;padding:5px 10px;font-size:12px;}}
+        QLabel#modeBadge[mode="powershell"] {{background:{t['amber_bg']};color:{t['amber']};border-color:{t['amber_border']};}}
+        QLabel#modeBadge[mode="mock"] {{background:{t['blue_bg']};color:{t['accent']};}}
+        QPushButton {{background:{t['panel']};border:1px solid {t['button_border']};border-radius:5px;padding:7px 12px;min-height:20px;}}
+        QPushButton:hover {{background:{t['hover']};border-color:{t['accent']};}}
+        QPushButton:pressed {{background:{t['select']};}}
+        QPushButton#primaryButton {{background:{t['accent']};color:#ffffff;border-color:{t['accent']};font-weight:500;}}
+        QPushButton#primaryButton:hover {{background:{t['accent_hover']};}}
+        QPushButton#dangerButton {{color:{t['red']};border-color:{t['red']};min-width:52px;}}
+        QPushButton#textButton {{border:0;background:transparent;color:{t['muted']};font-size:12px;padding:3px 4px;}}
+        QPushButton:disabled {{color:{t['disabled']};background:{t['bg']};border-color:{t['border']};}}
+        QToolButton {{border:0;padding:4px;}}
+        QToolButton#utilityButton {{font-size:23px;min-width:28px;}}
+        QToolButton:hover {{color:{t['accent']};}}
+        QToolButton::menu-indicator {{image:none;}}
+        QToolButton#logToggle {{font-size:13px;font-weight:600;padding:3px 0;}}
+        QCheckBox {{spacing:7px;}}
+        QCheckBox::indicator {{width:15px;height:15px;border:1px solid {t['button_border']};border-radius:3px;background:{t['panel']};}}
+        QCheckBox::indicator:checked {{background:{t['accent']};border-color:{t['accent']};image:url({self._checkmark_path()});}}
+        QCheckBox::indicator:disabled {{border-color:{t['border']};}}
+        QCheckBox#themeSwitch::indicator {{width:31px;height:17px;border-radius:9px;background:{t['button_border']};image:none;}}
+        QCheckBox#themeSwitch::indicator:checked {{background:{t['accent']};image:none;}}
+        QWidget#workspaceTabRow {{background:{t['panel']};border-bottom:1px solid {t['border']};}}
+        QTabBar#workspaceTabs {{background:{t['panel']};border:0;font-size:15px;font-weight:600;}}
+        QTabBar::tab {{background:transparent;color:{t['text']};padding:15px 22px 13px;min-height:24px;border-bottom:3px solid transparent;}}
+        QTabBar::tab:selected {{color:{t['accent']};border-bottom-color:{t['accent']};}}
+        QTabBar::tab:disabled {{color:{t['disabled']};}}
+        QWidget#requestToolbar {{background:{t['panel']};border:1px solid {t['border']};border-top-left-radius:6px;border-top-right-radius:6px;}}
+        QLabel#sectionTitle {{font-size:16px;font-weight:700;}}
+        QTableWidget {{background:{t['panel']};alternate-background-color:{t['bg']};border:1px solid {t['border']};border-radius:5px;gridline-color:{t['grid']};selection-background-color:{t['select']};selection-color:{t['text']};}}
+        QTableWidget QWidget {{background:transparent;}}
+        QTableWidget::item {{padding:5px;border:0;}}
+        QTableWidget::item:selected {{background:{t['select']};color:{t['text']};}}
+        QHeaderView::section {{background:{t['header']};color:{t['text']};border:0;border-right:1px solid {t['grid']};border-bottom:1px solid {t['border']};padding:7px 4px;font-size:12px;font-weight:600;}}
+        QTableCornerButton::section {{background:{t['header']};border:1px solid {t['border']};}}
+        QWidget#detailPanel {{background:{t['panel']};border:1px solid {t['border']};border-radius:5px;}}
+        QLabel#stepIcon {{background:{t['badge']};color:{t['muted']};border-radius:12px;font-size:12px;}}
+        QLabel#stepIcon[state="succeeded"] {{background:{t['green']};color:#ffffff;}}
+        QLabel#stepIcon[state="running"] {{background:{t['accent']};color:#ffffff;}}
+        QLabel#stepIcon[state="failed"] {{background:{t['red']};color:#ffffff;}}
+        QLabel#stepLabel[state="running"] {{color:{t['accent']};font-weight:600;}}
+        QLabel#stepLabel[state="failed"] {{color:{t['red']};}}
+        QWidget#detailBanner {{background:{t['blue_bg']};border-radius:5px;}}
+        QLabel#bannerTitle {{color:{t['accent']};font-weight:600;font-size:12px;}}
+        QLabel#bannerBody {{color:{t['muted']};font-size:11px;}}
+        QWidget#logsPanel {{background:{t['panel']};border:1px solid {t['border']};border-radius:6px;}}
+        QTextEdit#jobLog {{background:transparent;border:0;border-top:1px solid {t['border']};padding:7px 2px;color:{t['text']};font-size:12px;}}
+        QWidget#actionsBar {{background:{t['bg']};}}
+        QLabel#selectionLabel {{color:{t['accent']};font-weight:700;font-size:14px;}}
+        QLineEdit,QComboBox,QSpinBox {{background:{t['panel']};border:1px solid {t['button_border']};border-radius:4px;padding:5px;selection-background-color:{t['select']};}}
+        QMenu {{background:{t['panel']};border:1px solid {t['border']};padding:5px;}}
+        QMenu::item {{padding:7px 18px;border-radius:3px;}}
+        QMenu::item:selected {{background:{t['select']};}}
+        QMenu::separator {{height:1px;background:{t['border']};margin:5px;}}
+        QScrollBar:vertical {{background:{t['bg']};width:9px;margin:0;}}
+        QScrollBar::handle:vertical {{background:{t['button_border']};border-radius:4px;min-height:25px;}}
+        QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical {{height:0;}}
+        QScrollBar:horizontal {{background:{t['bg']};height:9px;margin:0;}}
+        QScrollBar::handle:horizontal {{background:{t['button_border']};border-radius:4px;min-width:25px;}}
+        QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal {{width:0;}}
+        '''
+        self.setStyleSheet(qss)
+        self.brand_icon.setPixmap(folder_mark(t['accent']))
+        self.settings_button.setText('')
+        self.settings_button.setIcon(themed_icon('settings',t['muted']))
+        self.settings_button.setIconSize(QSize(24,24))
+        self.btn_theme.setText('')
+        self.btn_theme.setIcon(themed_icon('moon' if mode=='light' else 'sun',t['muted']))
+        self.btn_theme.setIconSize(QSize(24,24))
+        self.btn_theme.setToolTip('다크 테마로 전환' if mode=='light' else '라이트 테마로 전환')
+        blocked = self.theme_switch.blockSignals(True)
+        self.theme_switch.setChecked(mode=='dark')
+        self.theme_switch.blockSignals(blocked)
+        self._refresh_connection_strip()
+        self.table.viewport().update()
 
-        if hasattr(self, "btn_theme") and self.btn_theme:
-            self.btn_theme.setText("🌙" if mode == "light" else "🌞")
-            self.btn_theme.setToolTip("다크 모드로 전환" if mode == "light" else "라이트 모드로 전환")
-
-        if hasattr(self, "table") and self.table and hasattr(self.table.horizontalHeader(), "_reposition"):
-            self.table.horizontalHeader()._reposition()
 
     def _toggle_theme(self):
         next_mode = "dark" if getattr(self, "current_theme", "light") == "light" else "light"
@@ -3603,7 +3695,7 @@ class AccessManager(QMainWindow):
             os.makedirs(folder, exist_ok=True)
         self._notif_counts = {"신규미완료": 0, "진행-부여": 0, "진행-제거": 0, "종료-부여": 0, "종료-제거": 0}
         self.setWindowTitle(f"{APP_NAME}")
-        self.resize(900, 600)
+        self.resize(1060, 900)
         self._init_ui()
         self._notify_refresh_mins = 10
         try:
@@ -3683,231 +3775,230 @@ class AccessManager(QMainWindow):
         self.session.set_debug(self.debug_enabled, DEBUG_DIR)
 
     def _init_ui(self):
-        main_layout = QVBoxLayout()
-        header_bar = QHBoxLayout()
-        self.header_bar = header_bar
-        header_bar.setContentsMargins(0, 0, 0, 0)
-        header_bar.setSpacing(6)
+        self._ui_refresh_pending = False
+        self._api_verified = False
+        self._executor_mode = None
+        self.current_theme = 'light'
+        self.setMinimumSize(1000,820)
+        self.setFont(QFont('Segoe UI' if os.name=='nt' else 'Noto Sans CJK KR',10))
+        root = QWidget()
+        root.setObjectName('appRoot')
+        main = QVBoxLayout(root)
+        main.setContentsMargins(0,0,0,0)
+        main.setSpacing(0)
 
-        header_bar.addStretch()
-        self._title_widget = QLabel("")
-        header_bar.addWidget(self._title_widget, 0, Qt.AlignVCenter)
-        header_bar.addStretch()
-
-        self.btn_notif = QToolButton(self)
-        self.btn_notif.setText("💡")
-        self.btn_notif.setToolTip("요청건 알림")
-        self.btn_notif.setAutoRaise(True)
-        self.btn_notif.setStyleSheet("""
-            QToolButton {
-                border: none;
-                background: transparent;
-                font-size: 15px;
-                padding: 0px;
-            }
-            QToolButton:hover {
-                background: transparent;    /* 마우스 올렸을 때 배경 투명 */
-            }
-            QToolButton:pressed {
-                background: transparent;    /* 클릭 중에도 투명 */
-            }
-            QToolButton:checked {
-                background: transparent;    /* 체크 상태도 투명 */
-            }
-            QToolButton:focus {
-                outline: none;              /* 포커스 테두리 제거 */
-            }
-        """)
-
-        self.btn_notif.clicked.connect(self._open_notif_popup)
-        self.badge_notif = BadgeToolButton(self.btn_notif, self)
-        self.badge_notif.setBadgeSize(9)
+        header = QWidget(); header.setObjectName('appHeader')
+        self.header_bar = QHBoxLayout(header)
+        self.header_bar.setContentsMargins(22,17,22,17)
+        self.header_bar.setSpacing(15)
+        self.brand_icon = QLabel(); self.brand_icon.setFixedSize(46,46)
+        self.header_bar.addWidget(self.brand_icon)
+        title = QVBoxLayout(); title.setSpacing(1)
+        self.brand_title = QLabel('Folder Grant'); self.brand_title.setObjectName('brandTitle')
+        self.brand_title.setCursor(Qt.PointingHandCursor)
+        self.brand_title.mousePressEvent = lambda event:self._show_help()
+        subtitle = QLabel('폴더 권한 관리'); subtitle.setObjectName('brandSubtitle')
+        title.addWidget(self.brand_title); title.addWidget(subtitle)
+        self.header_bar.addLayout(title)
+        self.version_badge = QLabel(APP_VERSION_STR); self.version_badge.setObjectName('versionBadge')
+        self.version_badge.setFixedHeight(26)
+        self.version_badge.setAlignment(Qt.AlignCenter)
+        self.build_label = QLabel(f'Build {APP_BUILD}'); self.build_label.setObjectName('mutedLabel')
+        self.header_bar.addWidget(self.version_badge)
+        self.header_bar.addWidget(self.build_label)
+        self.header_bar.addStretch()
+        self.settings_button = QToolButton(); self.settings_button.setObjectName('utilityButton')
+        self.settings_button.setText('⚙'); self.settings_button.setToolTip('설정 및 도움말')
+        self.settings_button.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(self.settings_button)
+        self.btn_api_settings = menu.addAction('API 연결 설정',self._open_api_settings)
+        self.btn_settings = menu.addAction('BUS 계정 설정',self._open_settings)
+        menu.addSeparator()
+        self.columns_action = menu.addAction('상세 열 표시 (이름 · 부서 · Role)')
+        self.columns_action.setCheckable(True)
+        self.columns_action.toggled.connect(self._toggle_detail_columns)
+        menu.addAction('사용 안내',self._show_help)
+        menu.addAction('BUS 요청 알림',self._open_notif_popup)
+        self.settings_button.setMenu(menu)
+        self.header_bar.addWidget(self.settings_button)
+        self.btn_theme = QToolButton(); self.btn_theme.setObjectName('utilityButton')
+        self.btn_theme.clicked.connect(self._toggle_theme)
+        self.header_bar.addWidget(self.btn_theme)
+        self.theme_switch = ThemeSwitch(); self.theme_switch.setObjectName('themeSwitch')
+        self.theme_switch.setToolTip('다크 테마')
+        self.theme_switch.toggled.connect(lambda checked:self._toggle_theme())
+        self.header_bar.addWidget(self.theme_switch)
+        self.btn_notif = QToolButton(self); self.btn_notif.hide()
+        self.badge_notif = BadgeToolButton(self.settings_button,self)
+        self.badge_notif.setBadgeSize(10)
         self.badge_notif.setOffset(0,0)
+        self._title_widget = self.brand_title
+        main.addWidget(header)
 
-        self.btn_theme = QToolButton(self)
-        self.btn_theme.setAutoRaise(True)
-        self.btn_theme.setCursor(Qt.PointingHandCursor)
-        self.btn_theme.setToolTip("테마 전환")
-        self.btn_theme.setStyleSheet("""
-            QToolButton {
-                border: none;
-                background: transparent;
-                font-size: 15px;
-                padding: 0 6px;
-            }
-            QToolButton:hover {
-                background: transparent;
-            }
-        """)
-        header_bar.addWidget(self.btn_theme, 0, Qt.AlignRight | Qt.AlignVCenter)
-        header_bar.addWidget(self.btn_notif, 0, Qt.AlignRight | Qt.AlignVCenter)
-        header_w = QWidget()
-        header_w.setLayout(header_bar)
-        main_layout.addWidget(header_w)
+        self.connection_bar = QWidget(); self.connection_bar.setObjectName('connectionBar')
+        connection = QHBoxLayout(self.connection_bar)
+        connection.setContentsMargins(24,10,24,10); connection.setSpacing(18)
+        self.api_status_label = QLabel('○  API 미확인')
+        self.bus_status_label = QLabel('○  BUS 미연결')
+        self.server_label = QLabel('—'); self.server_label.setObjectName('mutedLabel')
+        self.execution_mode_label = QLabel('실행 모드 미확인'); self.execution_mode_label.setObjectName('modeBadge')
+        for widget in (self.api_status_label,self.bus_status_label,self.server_label):
+            connection.addWidget(widget)
+        connection.addStretch(); connection.addWidget(self.execution_mode_label)
+        main.addWidget(self.connection_bar)
 
-        file_bar = QHBoxLayout()
-        #self.file_label = QLabel("요청 확인 버튼 클릭 또는 엑셀 파일 불러오기, 수동으로 리스트 입력")
-        #self.file_label.setFont(QFont("Segoe UI", 9))
-
-        self.btn_newcheck = QPushButton("𝙉 신규 확인")
-        self.btn_newcheck.setFont(QFont("Segoe UI", 9))
-        self.btn_newcheck.clicked.connect(self.open_new_viewer)
-
-        self.btn_request = QPushButton("🔍 요청 확인")
-        self.btn_request.setFont(QFont("Segoe UI", 9))
-        self.btn_request.clicked.connect(self._request_and_import)
-
-        self.btn_manual = QPushButton("📝 수동 입력")
-        self.btn_manual.setFont(QFont("Segoe UI", 9))
+        self.tabs = QTabBar(); self.tabs.setObjectName('workspaceTabs')
+        self.tabs.setExpanding(False)
+        self.tabs.setElideMode(Qt.ElideNone)
+        self.tabs.addTab('권한 요청'); self.tabs.addTab('신규 프로젝트')
+        tab_row = QWidget(); tab_row.setObjectName('workspaceTabRow')
+        tab_layout = QHBoxLayout(tab_row)
+        tab_layout.setContentsMargins(18,0,18,0); tab_layout.setSpacing(0)
+        tab_layout.addWidget(self.tabs)
+        main.addWidget(tab_row)
+        self.workspaces = QStackedWidget()
+        self.request_page = QWidget()
+        request_layout = QVBoxLayout(self.request_page)
+        request_layout.setContentsMargins(18,0,18,0); request_layout.setSpacing(0)
+        toolbar = QWidget(); toolbar.setObjectName('requestToolbar')
+        toolbar_layout = QHBoxLayout(toolbar); toolbar_layout.setContentsMargins(15,12,12,12)
+        heading = QLabel('요청 목록'); heading.setObjectName('sectionTitle')
+        toolbar_layout.addWidget(heading); toolbar_layout.addStretch()
+        self.btn_request = QPushButton('BUS 요청 조회'); self.btn_request.clicked.connect(self._request_and_import)
+        self.btn_file = QPushButton('엑셀 불러오기'); self.btn_file.clicked.connect(self.choose_file)
+        self.btn_manual = QPushButton('+  수동 입력'); self.btn_manual.setObjectName('primaryButton')
         self.btn_manual.clicked.connect(self.open_manual_dialog)
+        for button in (self.btn_request,self.btn_file,self.btn_manual):
+            toolbar_layout.addWidget(button)
+        request_layout.addWidget(toolbar)
 
-        self.btn_file = QPushButton("📂 파일 선택")
-        self.btn_file.setFont(QFont("Segoe UI", 9))
-        self.btn_file.clicked.connect(self.choose_file)
-
-        self.btn_settings = QPushButton("⚙ 설정")
-        self.btn_settings.setFont(QFont("Segoe UI", 9))
-        self.btn_settings.clicked.connect(self._open_settings)
-        self.btn_api_settings = QPushButton('API 설정')
-        self.btn_api_settings.clicked.connect(self._open_api_settings)
-
-        #file_bar.addWidget(self.file_label)
-        file_bar.addStretch()
-        file_bar.addWidget(self.btn_newcheck)
-        file_bar.addWidget(self.btn_request)
-        file_bar.addWidget(self.btn_manual)
-        file_bar.addWidget(self.btn_file)
-        file_bar.addWidget(self.btn_settings)
-        file_bar.addWidget(self.btn_api_settings)
-        main_layout.addLayout(file_bar)
-
-        self.table = CopyTable()
-        self.table.setProperty("hasRows", False)
-        header = CheckBoxHeader(Qt.Horizontal, self.table)
-        self.table.setHorizontalHeader(header)
-        header.stateChanged.connect(self.toggle_all_rows)
-
-        self.table.setFont(QFont("Consolas", 9))
+        content = QHBoxLayout(); content.setContentsMargins(0,0,0,0); content.setSpacing(10)
+        self.table = CopyTable(); self.table.setObjectName('requestTable')
+        self.table.setProperty('hasRows',False)
         self.table.setColumnCount(11)
-        self.table.setHorizontalHeaderLabels([
-            "", "구분", "요청사항", "사번", "이름", "프로젝트코드","Level2","Level3","부서","Role","상태"
-        ])
-        self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked | QAbstractItemView.EditKeyPressed)
+        self.table.setHorizontalHeaderLabels(['','구분','요청','사번','이름','프로젝트','Level2 / Level3','Level3','부서','Role','상태'])
+        header_check = CheckBoxHeader(Qt.Horizontal,self.table)
+        self.table.setHorizontalHeader(header_check)
+        header_check.stateChanged.connect(self.toggle_all_rows)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.DoubleClicked|QAbstractItemView.EditKeyPressed)
+        self.table.setAlternatingRowColors(False)
+        self.table.setShowGrid(True)
+        self.table.setWordWrap(False)
+        self.table.verticalHeader().hide()
+        self.table.verticalHeader().setDefaultSectionSize(47)
+        self.table.horizontalHeader().setFixedHeight(43)
+        self.table.horizontalHeader().setMinimumSectionSize(30)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        widths = {self.COL_SELECT:34,self.COL_KIND:52,self.COL_REQTYPE:78,self.COL_USER:67,
+                  self.COL_PROJ:83,self.COL_LV2:159,self.COL_STATUS:138}
+        for column,width in widths.items():
+            self.table.horizontalHeader().setSectionResizeMode(column,QHeaderView.Interactive)
+            self.table.setColumnWidth(column,width)
+        for column in (self.COL_NAME,self.COL_LV3,self.COL_DEPT,self.COL_ROLE):
+            self.table.setColumnHidden(column,True)
+        self.table.setItemDelegate(RequestDelegate(self))
         self.table.cellChanged.connect(self._on_cell_changed)
-
-        hv = self.table.horizontalHeader()
-        hv.setSectionResizeMode(QHeaderView.ResizeToContents)
-        hv.setStretchLastSection(True)
-
-        hv.setSectionResizeMode(self.COL_SELECT, QHeaderView.Fixed)
-        self.table.setColumnWidth(self.COL_SELECT, 28)
-        hv.setMinimumSectionSize(20)
-
-        vh = self.table.verticalHeader()
-        vh.setSectionResizeMode(QHeaderView.Fixed)
-        vh.setDefaultSectionSize(28)
-        vh.setMinimumSectionSize(22)
-        vh.setFixedWidth(28)
-        self.table.setCornerButtonEnabled(True)
-
-        header.sectionResized.connect(lambda *_: header.updateSection(self.COL_SELECT))
-        try:
-            header.geometriesChanged.connect(lambda: header.updateSection(self.COL_SELECT))
-        except Exception:
-            pass
-
-        main_layout.addWidget(self.table)
+        self.table.itemSelectionChanged.connect(self._refresh_detail)
+        self.table.model().rowsInserted.connect(self._schedule_ui_refresh)
+        self.table.model().rowsRemoved.connect(self._schedule_ui_refresh)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._open_table_menu)
+        content.addWidget(self.table,1)
 
-        btn_bar = QHBoxLayout()
+        self.detail_panel = QWidget(); self.detail_panel.setObjectName('detailPanel')
+        self.detail_panel.setFixedWidth(258)
+        detail = QVBoxLayout(self.detail_panel); detail.setContentsMargins(17,14,17,14); detail.setSpacing(12)
+        detail_title = QLabel('선택 요청 상세'); detail_title.setObjectName('sectionTitle'); detail.addWidget(detail_title)
+        form = QFormLayout(); form.setHorizontalSpacing(12); form.setVerticalSpacing(9)
+        self.detail_project = QLabel('—'); self.detail_employee = QLabel('—')
+        self.detail_access = QLabel('요청을 선택하세요'); self.detail_access.setWordWrap(True)
+        self.detail_role = QLabel('—'); self.detail_role.setWordWrap(True)
+        self.detail_name = QLabel('—'); self.detail_department = QLabel('—')
+        for text,widget in [('프로젝트',self.detail_project),('대상 사번',self.detail_employee),
+                            ('권한',self.detail_access),('Role',self.detail_role)]:
+            label = QLabel(text); label.setObjectName('mutedLabel'); form.addRow(label,widget)
+        detail.addLayout(form)
+        self.detail_extra = QLabel(''); self.detail_extra.setObjectName('mutedLabel'); self.detail_extra.setWordWrap(True)
+        self.detail_extra.hide(); detail.addWidget(self.detail_extra)
+        self.step_icons = []; self.step_labels = []
+        for index,text in enumerate(['요청 검증','그룹 권한 적용','폴더 권한 적용','BUS 완료 처리']):
+            step_layout = QHBoxLayout(); step_layout.setSpacing(12)
+            icon = QLabel(str(index+1)); icon.setObjectName('stepIcon'); icon.setAlignment(Qt.AlignCenter); icon.setFixedSize(24,24)
+            label = QLabel(text); label.setObjectName('stepLabel'); label.setWordWrap(True)
+            step_layout.addWidget(icon); step_layout.addWidget(label,1)
+            detail.addLayout(step_layout)
+            self.step_icons.append(icon); self.step_labels.append(label)
+        detail.addStretch()
+        self.progress_panel = QWidget(); self.progress_panel.setObjectName('detailBanner')
+        banner = QVBoxLayout(self.progress_panel); banner.setContentsMargins(12,10,12,10); banner.setSpacing(3)
+        self.detail_banner_title = QLabel('선택 요청 대기'); self.detail_banner_title.setObjectName('bannerTitle'); self.detail_banner_title.setWordWrap(True)
+        self.status_label = QLabel('목록에서 요청을 선택하세요.'); self.status_label.setWordWrap(True)
+        self.status_label.setObjectName('bannerBody')
+        banner.addWidget(self.detail_banner_title); banner.addWidget(self.status_label)
+        detail.addWidget(self.progress_panel)
+        content.addWidget(self.detail_panel)
+        request_layout.addLayout(content,1)
+        self.workspaces.addWidget(self.request_page)
+        self.project_page = QWidget(); self.project_page_layout = QVBoxLayout(self.project_page)
+        self.project_page_layout.setContentsMargins(18,0,18,0)
+        self.workspaces.addWidget(self.project_page)
+        main.addWidget(self.workspaces,1)
+        self.tabs.currentChanged.connect(self._switch_workspace)
+        self.btn_newcheck = QAction('신규 프로젝트',self)
+        self.btn_newcheck.triggered.connect(self.open_new_viewer)
 
-        self.btn_clear_log = QPushButton("🗑 로그 지우기")
-        self.btn_clear_log.setFont(QFont("Segoe UI", 9))
-        self.btn_clear_log.setToolTip("아래 로그 창 내용을 비웁니다")
+        self.logs_panel = QWidget(); self.logs_panel.setObjectName('logsPanel')
+        logs = QVBoxLayout(self.logs_panel); logs.setContentsMargins(12,0,12,0); logs.setSpacing(0)
+        log_header = QHBoxLayout(); log_header.setContentsMargins(0,7,0,7)
+        self.log_toggle = QToolButton(); self.log_toggle.setText('⌄  작업 로그')
+        self.log_toggle.setObjectName('logToggle'); self.log_toggle.setCheckable(True); self.log_toggle.setChecked(True)
+        self.log_toggle.toggled.connect(self._toggle_log)
+        self.btn_clear_log = QPushButton('로그 지우기'); self.btn_clear_log.setObjectName('textButton')
         self.btn_clear_log.clicked.connect(self._clear_log)
+        log_header.addWidget(self.log_toggle); log_header.addStretch(); log_header.addWidget(self.btn_clear_log)
+        logs.addLayout(log_header)
+        self.log = QTextEdit(); self.log.setReadOnly(True); self.log.setAcceptRichText(False)
+        self.log.setObjectName('jobLog'); self.log.setFixedHeight(103)
+        self.log.setFont(QFont('Consolas' if os.name=='nt' else 'Noto Sans Mono CJK KR',9))
+        self.log.setLineWrapMode(QTextEdit.WidgetWidth); self.log.setWordWrapMode(QTextOption.WrapAnywhere)
+        logs.addWidget(self.log)
+        logs_outer = QWidget()
+        logs_outer_layout = QVBoxLayout(logs_outer)
+        logs_outer_layout.setContentsMargins(18,10,18,0)
+        logs_outer_layout.addWidget(self.logs_panel)
+        main.addWidget(logs_outer)
 
-        self.chk_dry = QCheckBox("Dry Run")
-        self.chk_dry.setFont(QFont("Segoe UI", 9))
-
-        self.chk_auto_complete = QCheckBox("실행 후 자동 완료처리")
-        self.chk_auto_complete.setFont(QFont("Segoe UI", 9))
-        self.chk_auto_complete.setChecked(True)
-        self.chk_auto_complete.stateChanged.connect(
-            lambda _: setattr(self, "auto_complete_after_add", self.chk_auto_complete.isChecked())
-        )
-
-        self.btn_run_execute = QPushButton("> 실행")
-        self.btn_run_execute.setFont(QFont("Segoe UI", 9))
-        self.btn_run_execute.clicked.connect(self.run_execute)
-
-        self.btn_run_complete = QPushButton("v 완료 처리")
-        self.btn_run_complete.setFont(QFont("Segoe UI", 9))
-        self.btn_run_complete.clicked.connect(self.run_complete)
-
-        self.btn_stop = QPushButton("x 중지")
-        self.btn_stop.setFont(QFont("Segoe UI", 9))
-        self.btn_stop.setToolTip("현재 실행 중인 작업과 대기 중인 모든 작업을 중지합니다")
-        self.btn_stop.setEnabled(False)
+        self.actions_bar = QWidget(); self.actions_bar.setObjectName('actionsBar')
+        actions = QHBoxLayout(self.actions_bar); actions.setContentsMargins(20,12,20,10); actions.setSpacing(9)
+        self.selection_label = QLabel('선택 0건'); self.selection_label.setObjectName('selectionLabel')
+        self.chk_auto_complete = QCheckBox('성공 후 BUS 자동 완료'); self.chk_auto_complete.setChecked(True)
+        self.chk_auto_complete.toggled.connect(lambda checked:setattr(self,'auto_complete_after_add',checked))
+        self.chk_dry = QCheckBox('Dry Run',self); self.chk_dry.hide()
+        self.btn_preview = QPushButton('미리보기'); self.btn_preview.clicked.connect(self._preview_selected)
+        self.btn_run_execute = QPushButton('선택 실행'); self.btn_run_execute.setObjectName('primaryButton')
+        self.btn_run_execute.clicked.connect(self._execute_selected)
+        self.btn_run_complete = QPushButton('BUS 완료 재확인'); self.btn_run_complete.clicked.connect(self.run_complete)
+        self.btn_stop = QPushButton('중지'); self.btn_stop.setObjectName('dangerButton'); self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self._stop_all)
-
-        self.btn_theme.clicked.connect(self._toggle_theme)
-
-        btn_bar.addWidget(self.btn_clear_log)
-        btn_bar.addStretch()
-        btn_bar.addWidget(self.chk_dry)
-        btn_bar.addWidget(self.chk_auto_complete)
-        btn_bar.addWidget(self.btn_run_execute)
-        btn_bar.addWidget(self.btn_run_complete)
-        btn_bar.addWidget(self.btn_stop)
-        main_layout.addLayout(btn_bar)
-
-        self.log = QTextEdit()
-        self.log.setAcceptRichText(False)
-        self.log.setLineWrapMode(QTextEdit.WidgetWidth)
-        self.log.setWordWrapMode(QTextOption.WrapAnywhere)
-        self.log.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.log.setFont(QFont("Consolas", 9))
-        self.log.setReadOnly(True)
-        main_layout.addWidget(self.log)
-
-        container = QWidget()
-        container.setLayout(main_layout)
-        self.setCentralWidget(container)
-
-        sb = super().statusBar()
-        if sb is None:
-            sb = QStatusBar(self)
-            self.setStatusBar(sb)
-        self._statusbar = sb
-        self._statusbar.setSizeGripEnabled(False)
-
-        self.prg = QProgressBar()
-        self.prg.setRange(0,100)
-        self.prg.setValue(0)
-        self.prg.setTextVisible(False)
-        self.prg.setFixedSize(0, 0)
-        self.prg.hide()
-        self.status_label = QLabel("")
-        self.status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.status_label.setMinimumWidth(420)
-        self.status_label.setStyleSheet("padding-right: 12px; padding-bottom: 2px;")
-        self.progress_panel = QWidget()
-        self.progress_panel.setVisible(False)
-        progress_layout = QVBoxLayout(self.progress_panel)
-        progress_layout.setContentsMargins(0, 0, 12, 2)
-        progress_layout.setSpacing(0)
-        progress_layout.addWidget(self.status_label, 0, Qt.AlignRight | Qt.AlignVCenter)
-        self._statusbar.addPermanentWidget(self.progress_panel, 1)
-        self._progress_started_at = None
-        self._progress_detail = ""
-        self._progress_project = ""
-        self._progress_done = 0
-        self._progress_total = 0
-        self._progress_running = False
-        self._progress_timer = QTimer(self)
-        self._progress_timer.setInterval(1000)
+        actions.addWidget(self.selection_label); actions.addWidget(self.chk_auto_complete); actions.addStretch()
+        for button in (self.btn_preview,self.btn_run_execute,self.btn_run_complete,self.btn_stop):
+            actions.addWidget(button)
+        main.addWidget(self.actions_bar)
+        self.summary_label = QLabel('전체 0건 · 실행 중 0 · 완료 0 · 확인 필요 0')
+        self.summary_label.setObjectName('summaryLabel')
+        self.summary_label.setContentsMargins(20,0,20,12)
+        main.addWidget(self.summary_label)
+        self.setCentralWidget(root)
+        self._statusbar = self.statusBar(); self._statusbar.hide()
+        self.prg = QProgressBar(self); self.prg.hide()
+        self._progress_started_at = None; self._progress_detail = ''; self._progress_project = ''
+        self._progress_done = 0; self._progress_total = 0; self._progress_running = False
+        self._progress_timer = QTimer(self); self._progress_timer.setInterval(1000)
         self._progress_timer.timeout.connect(self._refresh_progress_status)
+        self._progress_timer.timeout.connect(self._refresh_detail)
+
 
     def _format_elapsed(self) -> str:
         if not getattr(self, "_progress_started_at", None):
@@ -4024,6 +4115,7 @@ class AccessManager(QMainWindow):
         QTimer.singleShot(0, lambda t=total: self.badge_notif.setBadge(t))
 
     def _on_watcher_ready(self, ok: bool, msg: str):
+        self._refresh_connection_strip()
         if hasattr(self, "btn_notif"):
             self.btn_notif.setEnabled(bool(ok))
             self.btn_notif.setToolTip("요청건 알림" if ok else "세션 준비 안됨")
@@ -4048,20 +4140,26 @@ class AccessManager(QMainWindow):
         menu.addAction(f"진행-제거: {n_pg_r}")
         menu.addAction(f"종료-부여: {n_ed_g}")
         menu.addAction(f"종료-제거: {n_ed_r}")
-        pos = self.btn_notif.mapToGlobal(self.btn_notif.rect().bottomRight())
+        pos = self.settings_button.mapToGlobal(self.settings_button.rect().bottomRight())
         menu.popup(pos)
 
     def open_new_viewer(self):
+        if self.tabs.currentIndex()!=1:
+            self.tabs.setCurrentIndex(1)
+            return
         if self._closing:
             return
         existing = getattr(self,'_newdlg',None)
         if existing is not None:
             existing.show()
-            existing.raise_()
-            existing.activateWindow()
+            if existing.isWindow():
+                existing.raise_()
+                existing.activateWindow()
             return
         # Register the one persistent viewer before asynchronous session preparation.
         self._newdlg = NewItemsViewer(self)
+        self._newdlg.setWindowFlags(Qt.Widget)
+        self.project_page_layout.addWidget(self._newdlg)
         self._newdlg.btn_refresh.clicked.connect(self._load_new_items)
         self._newdlg.show()
         def _after_ready(ok: bool):
@@ -4132,33 +4230,10 @@ class AccessManager(QMainWindow):
         return "light"
 
     def _ensure_logo_and_set_title(self):
-        try:
-            os.makedirs(CONF_DIR, exist_ok=True)
+        icon = resource_path('assets/fgt.ico')
+        if os.path.exists(icon):
+            self.setWindowIcon(QIcon(icon))
 
-            target_logo = os.path.join(CONF_DIR, LOGO_FILE)
-            if not os.path.exists(target_logo):
-                bundled_logo = resource_path(os.path.join("assets", LOGO_FILE))
-                if os.path.exists(bundled_logo):
-                    shutil.copyfile(bundled_logo, target_logo)
-
-            target_icon = os.path.join(CONF_DIR, ICON_FILE)
-            if not os.path.exists(target_icon):
-                bundled_icon = resource_path(os.path.join("assets", ICON_FILE))
-                if os.path.exists(bundled_icon):
-                    shutil.copyfile(bundled_icon, target_icon)
-
-            self._apply_title_logo(target_logo if os.path.exists(target_logo) else None)
-
-            if os.path.exists(target_icon):
-                app = QApplication.instance()
-                icon = QIcon(target_icon)
-                self.setWindowIcon(icon)
-                if app:
-                    app.setWindowIcon(icon)
-
-        except Exception as e:
-            self._apply_title_logo(None)
-            self._log(f"[로고/아이콘 준비 오류] {e}")
 
     def _apply_title_logo(self, logo_path: str | None):
         try:
@@ -4304,6 +4379,7 @@ class AccessManager(QMainWindow):
         thread.start()
 
     def _on_completion_refreshed(self,row,result):
+        self._set_api_connection_state(True,result)
         meta = self._row_metadata(row)
         meta['result'] = dict(result)
         self._set_row_metadata(row,meta)
@@ -4323,6 +4399,7 @@ class AccessManager(QMainWindow):
                 self._log(f'{row+1}행: 서버 작업이 아직 끝나지 않았습니다. 나중에 완료 처리를 다시 누르면 재조회합니다.')
 
     def _on_completion_refresh_error(self,row,message):
+        self._set_api_connection_state(False)
         meta = self._row_metadata(row)
         meta['result'] = {}
         self._set_row_metadata(row,meta)
@@ -4378,6 +4455,7 @@ class AccessManager(QMainWindow):
 
 
     def _on_session_ready(self, ok: bool, msg: str):
+        self._refresh_connection_strip()
         if ok:
             self._set_plain_status("세션 준비됨")
         else:
@@ -4601,6 +4679,8 @@ class AccessManager(QMainWindow):
             )
 
         to_disable = [
+            getattr(self, "btn_preview", None),
+            getattr(self, "tabs", None),
             getattr(self, "btn_api_settings", None),
             getattr(self, "btn_manual", None),
             getattr(self, "btn_file", None),
@@ -4900,6 +4980,7 @@ class AccessManager(QMainWindow):
             self.table.blockSignals(False)
 
     def _on_cell_changed(self,row,col):
+        self._schedule_ui_refresh()
         if col == self.COL_STATUS:
             return
         meta = self._row_metadata(row)
@@ -4995,6 +5076,7 @@ class AccessManager(QMainWindow):
             # Keep the original operator when retrying the same idempotent payload.
             payload = meta.get('payload') or make_access_payload(values,meta['request_id'],meta['source'],self._requester())
             meta['payload'] = payload
+            meta['live_result'] = {}
             if not self.chk_dry.isChecked():
                 meta['result'] = {}
             self._set_row_metadata(row,meta)
@@ -5024,6 +5106,8 @@ class AccessManager(QMainWindow):
         dialog = ApiSettingsDialog(self.api_config, self)
         if dialog.exec_() == QDialog.Accepted:
             self.api_config = dialog.values()
+            self._executor_mode = None
+            self._set_api_connection_state(getattr(dialog,'connection_verified',False))
             self._log('API 연결 설정을 저장했습니다. API Key는 로그에 기록하지 않습니다.')
 
 
@@ -5055,6 +5139,7 @@ class AccessManager(QMainWindow):
             old = self.table.blockSignals(True)
             item.setData(Qt.UserRole, dict(meta))
             self.table.blockSignals(old)
+            self._schedule_ui_refresh()
 
 
     def _bus_target(self, row):
@@ -5068,15 +5153,18 @@ class AccessManager(QMainWindow):
 
 
     def _on_api_progress(self, job):
+        self._set_api_connection_state(True,job)
         meta = self._row_metadata(self.current_row)
         if job.get('job_id'):
             meta['job_id'] = job['job_id']
+            meta['live_result'] = dict(job)
             self._set_row_metadata(self.current_row,meta)
         self._set_progress_status(f"API {job.get('status','')} / {job.get('job_id','')}",
                                  self._get(self.current_row,self.COL_PROJ),self.done_jobs,self.total_jobs,running=True)
 
 
     def _on_api_result(self, result):
+        self._set_api_connection_state(True,result)
         row = self.current_row
         meta = self._row_metadata(row)
         result = dict(result)
@@ -5111,6 +5199,7 @@ class AccessManager(QMainWindow):
 
 
     def _on_api_error(self, message):
+        self._set_api_connection_state(False)
         self.table.item(self.current_row,self.COL_STATUS).setText('API 오류 (등록 결과 확인 필요)')
         self._log(message)
         self.done_jobs += 1
@@ -5123,6 +5212,175 @@ class AccessManager(QMainWindow):
             QTimer.singleShot(0,self.close)
         elif not self._waiting_for_bus:
             self._start_next_job()
+
+    def _checkmark_path(self):
+        return resource_path('assets/check.svg').replace('\\','/')
+
+
+    def _preview_selected(self):
+        self.chk_dry.setChecked(True)
+        self.run_execute()
+
+
+    def _execute_selected(self):
+        self.chk_dry.setChecked(False)
+        self.run_execute()
+
+
+    def _toggle_log(self,expanded):
+        self.log.setVisible(expanded)
+        self.log_toggle.setText(('⌄' if expanded else '›')+'  작업 로그')
+
+
+    def _toggle_detail_columns(self,visible):
+        for column in (self.COL_NAME,self.COL_LV3,self.COL_DEPT,self.COL_ROLE):
+            self.table.setColumnHidden(column,not visible)
+        self.table.horizontalHeaderItem(self.COL_LV2).setText('Level2' if visible else 'Level2 / Level3')
+
+
+    def _switch_workspace(self,index):
+        self.workspaces.setCurrentIndex(index)
+        self.actions_bar.setVisible(index==0)
+        if index==1:
+            self.open_new_viewer()
+
+
+    def _schedule_ui_refresh(self,*args):
+        if not self._ui_refresh_pending:
+            self._ui_refresh_pending = True
+            QTimer.singleShot(0,self._refresh_ui)
+
+
+    def _refresh_ui(self):
+        self._ui_refresh_pending = False
+        selected = running = completed = attention = 0
+        for row in range(self.table.rowCount()):
+            checkbox = self._get_checkbox(row)
+            if checkbox:
+                selected += int(checkbox.isChecked())
+                if not checkbox.property('summaryConnected'):
+                    checkbox.toggled.connect(self._schedule_ui_refresh)
+                    checkbox.setProperty('summaryConnected',True)
+            status = self._get(row,self.COL_STATUS)
+            text,tone = request_status_presentation(status)
+            running += int(tone=='blue' and text!='미리보기')
+            completed += int(tone=='green')
+            attention += int(tone in {'red','amber'})
+        self.selection_label.setText(f'선택 {selected}건')
+        self.table.horizontalHeader().setChecked(bool(self.table.rowCount()) and selected==self.table.rowCount())
+        self.summary_label.setText(f'전체 {self.table.rowCount()}건 · 실행 중 {running} · 완료 {completed} · 확인 필요 {attention}')
+        self._fit_table_columns()
+        self._refresh_detail()
+
+    def _fit_table_columns(self):
+        if not self.table.isColumnHidden(self.COL_LV3):
+            return
+        width = max(620,self.table.viewport().width())
+        for column,fraction in [(self.COL_SELECT,.05),(self.COL_KIND,.09),(self.COL_REQTYPE,.13),
+                                (self.COL_USER,.115),(self.COL_PROJ,.145),(self.COL_LV2,.265)]:
+            self.table.setColumnWidth(column,int(width*fraction))
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        if hasattr(self,'table'):
+            QTimer.singleShot(0,self._fit_table_columns)
+
+
+    def _refresh_detail(self):
+        row = self.table.currentRow()
+        valid = 0 <= row < self.table.rowCount()
+        values = self._row_values(row) if valid else {}
+        meta = self._row_metadata(row) if valid else {}
+        result = meta.get('result') or {}
+        if not result and '실행중' in self._get(row,self.COL_STATUS):
+            result = meta.get('live_result') or {}
+        self.detail_project.setText(values.get('proj') or '—')
+        self.detail_employee.setText(values.get('user') or '—')
+        access = values.get('req','')
+        folder = ' / '.join(x for x in (values.get('lv2'),values.get('lv3')) if x)
+        self.detail_access.setText(f'{access} · {folder}' if folder else access or '요청을 선택하세요')
+        self.detail_role.setText(values.get('role') or '—')
+        self.detail_name.setText(self._get(row,self.COL_NAME) if valid else '')
+        self.detail_department.setText(self._get(row,self.COL_DEPT) if valid else '')
+        extra = ' · '.join(x for x in (self.detail_name.text(),self.detail_department.text()) if x)
+        self.detail_extra.setText(extra); self.detail_extra.setVisible(bool(extra))
+        raw_steps = result.get('steps') or []
+        statuses = ['queued']*4
+        if result.get('job_id') or result.get('valid'):
+            statuses[0] = 'succeeded'
+        if valid and '검증실패' in self._get(row,self.COL_STATUS):
+            statuses[0] = 'failed'
+        groups = [s for s in raw_steps if any(k in s.get('type','') for k in ('group','member'))]
+        acls = [s for s in raw_steps if s not in groups]
+        def phase(steps):
+            if any(s.get('status')=='failed' for s in steps): return 'failed'
+            if any(s.get('status')=='running' for s in steps): return 'running'
+            if steps and all(s.get('status')=='succeeded' for s in steps): return 'succeeded'
+            return 'queued'
+        statuses[1] = phase(groups); statuses[2] = phase(acls)
+        if meta.get('bus_done'):
+            statuses[3] = 'succeeded'
+        elif valid and self._get(row,self.COL_STATUS)=='완료 처리중':
+            statuses[3] = 'running'
+        labels = ['요청 검증','그룹 권한 적용','폴더 권한 적용','BUS 완료 처리']
+        if valid and meta.get('source')!='bus': labels[3] += ' · 수동 요청 제외'
+        elif values.get('kind')=='종료': labels[1] += ' · 해당 없음'
+        for index,(icon,label,state) in enumerate(zip(self.step_icons,self.step_labels,statuses)):
+            icon.setText('✓' if state=='succeeded' else str(index+1))
+            label.setText(labels[index])
+            for widget in (icon,label):
+                widget.setProperty('state',state)
+                widget.style().unpolish(widget); widget.style().polish(widget)
+        if valid:
+            raw = self._get(row,self.COL_STATUS)
+            shown,tone = request_status_presentation(raw)
+            self.detail_banner_title.setText('서버 작업 진행 중' if tone=='blue' and 'BUS' not in shown else shown)
+            message = result.get('error_message') or result.get('error_code') or ''
+            if result.get('status')=='running':
+                started = result.get('started_at')
+                elapsed = self._format_elapsed()
+                if started:
+                    try:
+                        when = datetime.datetime.fromisoformat(started.replace('Z','+00:00'))
+                        if when.tzinfo is None: when = when.replace(tzinfo=datetime.timezone.utc)
+                        seconds = max(0,int((datetime.datetime.now(datetime.timezone.utc)-when).total_seconds()))
+                        elapsed = f'{seconds//60:02d}:{seconds%60:02d}'
+                    except (ValueError,TypeError): pass
+                message = f'경과 {elapsed} · 최종 결과 대기'
+            if not message:
+                message = '서버 실제 성공 후에만 BUS 완료 가능' if meta.get('source')=='bus' else '선택한 요청의 서버 결과를 표시합니다.'
+            self.status_label.setText(message)
+        else:
+            self.detail_banner_title.setText('선택 요청 대기')
+            if not self._progress_running:
+                self.status_label.setText('목록에서 요청을 선택하세요.')
+        self.progress_panel.show()
+
+
+    def _refresh_connection_strip(self):
+        t = THEMES.get(self.current_theme,THEMES['light'])
+        api_ok = getattr(self,'_api_verified',False)
+        self.api_status_label.setText('●  API 연결됨' if api_ok else '○  API 미확인')
+        self.api_status_label.setStyleSheet(f"color:{t['green'] if api_ok else t['muted']};")
+        session = getattr(self,'session',None); watcher = getattr(self,'watch_session',None)
+        bus_ok = bool((session and session.is_ready()) or (watcher and watcher.is_ready()))
+        self.bus_status_label.setText('●  BUS 로그인됨' if bus_ok else '○  BUS 미연결')
+        self.bus_status_label.setStyleSheet(f"color:{t['green'] if bus_ok else t['muted']};")
+        parsed = urlsplit(getattr(self,'api_config',{}).get('base_url',DEFAULT_API_URL))
+        self.server_label.setText(parsed.netloc or '—')
+        mode = self._executor_mode if api_ok else None
+        self.execution_mode_label.setText({'powershell':'●  실제 실행 모드','mock':'●  모의 실행 모드'}.get(mode,'실행 모드 미확인'))
+        self.execution_mode_label.setProperty('mode',mode or 'unknown')
+        self.execution_mode_label.style().unpolish(self.execution_mode_label)
+        self.execution_mode_label.style().polish(self.execution_mode_label)
+
+
+    def _set_api_connection_state(self,connected,result=None):
+        self._api_verified = bool(connected)
+        if result and result.get('executor_mode') in {'mock','powershell'}:
+            self._executor_mode = result['executor_mode']
+        self._refresh_connection_strip()
+
 
 
 def _excepthook(etype, value, tb):
@@ -5140,6 +5398,7 @@ if __name__ == "__main__":
     _sys.excepthook = _excepthook
 
 if __name__ == "__main__":
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
     app = QApplication(sys.argv)
