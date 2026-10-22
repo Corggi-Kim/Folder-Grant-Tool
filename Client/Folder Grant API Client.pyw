@@ -545,7 +545,7 @@ class ApiJobWorker(QObject):
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, client: FolderGrantApiClient, kind: str, payload: dict, dry_run: bool = False):
+    def __init__(self, client: FolderGrantApiClient, kind: str, payload: dict, dry_run: bool = False, retry_job_id: str = None):
         super().__init__()
         if kind not in {'access', 'project'}:
             raise ValueError('알 수 없는 API 작업 종류입니다.')
@@ -554,13 +554,14 @@ class ApiJobWorker(QObject):
         self.max_wait_seconds = 4 * 60 * 60
         self._stop_event = threading.Event()
         self.job_id = None
+        self.retry_job_id = retry_job_id
 
     def stop(self) -> None:
         self._stop_event.set()
 
     def _verify_recovered_job(self, job: dict, preview: dict) -> None:
         """Only recover a BUS actor conflict when the server execution plan matches."""
-        if job.get('request_id') != self.payload['request_id']:
+        if self.payload['request_id'] not in {job.get('request_id'),job.get('original_request_id')}:
             raise ApiClientError('기존 Job의 요청번호가 일치하지 않습니다.',409)
         if self.kind == 'access':
             if any(job.get(k) != self.payload.get(k) for k in ('operation','project_status')):
@@ -587,14 +588,22 @@ class ApiJobWorker(QObject):
             preview = self.client.request('POST', path + '/preview', self.payload)
             return {**preview, 'status': 'preview', 'client_stopped': self._stop_event.is_set()}
         try:
-            job = self.client.request('POST', path, self.payload)
+            if self.retry_job_id:
+                job = self.client.request('POST',path+'/'+quote(self.retry_job_id,safe='')+'/retry',
+                                          {'requested_by':self.payload['requested_by']})
+            else:
+                job = self.client.request('POST', path, self.payload)
         except ApiClientError as exc:
-            bus_conflict = exc.status_code == 409 and self.payload.get('source') == 'bus'
+            if self.retry_job_id and exc.status_code==404:
+                raise ApiClientError('재실행 API를 사용할 수 없습니다. API 서버를 최신 버전으로 업데이트하고 재시작하세요.',404) from exc
+            bus_conflict = not self.retry_job_id and exc.status_code == 409 and self.payload.get('source') == 'bus'
             if exc.status_code is not None and exc.status_code < 500 and not bus_conflict:
                 raise
             # An accepted POST can lose its response. Never generate a new ID here.
             try:
                 job = self.client.request('GET', path + '/by-request/' + quote(self.payload['request_id'], safe=''))
+                if self.retry_job_id and job.get('job_id')==self.retry_job_id:
+                    raise ApiClientError('재실행 접수 여부를 확인하지 못했습니다. 같은 항목으로 다시 시도하세요.')
                 if bus_conflict:
                     preview = self.client.request('POST',path+'/preview',self.payload)
                     self._verify_recovered_job(job,preview)
@@ -680,7 +689,7 @@ class ApiJobRefreshWorker(QObject):
                     break
                 try:
                     result = self.client.request('GET','/api/v1/access-jobs/by-request/'+quote(request_id,safe=''))
-                    if result.get('request_id') != request_id:
+                    if request_id not in {result.get('request_id'),result.get('original_request_id')}:
                         raise ApiClientError('서버 Job의 요청번호가 현재 행과 일치하지 않습니다.')
                     if not self._stop_event.is_set():
                         self.refreshed.emit(row,result)
@@ -4809,6 +4818,7 @@ class AccessManager(QMainWindow):
         self._set_api_connection_state(True,result)
         meta = self._row_metadata(row)
         meta['result'] = dict(result)
+        meta.pop('_retry_parent_job_id',None); meta.pop('_failed_job_id',None)
         self._set_row_metadata(row,meta)
         self._log(f'{row+1}행 서버 재조회: '+json.dumps(result,ensure_ascii=False),
                   summary=self._api_log_summary(result,f'{row+1}행 서버 재조회'))
@@ -5146,15 +5156,21 @@ class AccessManager(QMainWindow):
             self._set_running_ui(False)
             self._finish_progress_status('중지됨' if self.stop_requested else '완료', stopped=self.stop_requested)
             return
-        row,payload,dry = self.run_queue.pop(0)
+        entry = self.run_queue.pop(0)
+        row,payload,dry = entry[:3]
+        retry_job_id = entry[3] if len(entry)>3 else None
         self.current_row = row
         self.current_seq = self.done_jobs+1
         self.current_mode = 'add' if payload['operation']=='grant' else 'remove'
         self.table.item(row,self.COL_STATUS).setText('Preview 조회 중' if dry else 'API 실행중')
         self._log(f"API {'Preview' if dry else 'Job'} 요청: {payload['request_id']}",
                   summary=f"{row+1}행 · 프로젝트 {self._get(row,self.COL_PROJ)}: {'미리보기' if dry else '권한 작업'} 요청")
+        if retry_job_id:
+            self._log(f'실패 작업 재실행: 이전 job_id={retry_job_id}',summary=f'{row+1}행: 실패 단계 재실행 요청')
         thread = QThread(self)
-        worker = ApiJobWorker(self._api_client(),'access',payload,dry)
+        worker = ApiJobWorker(self._api_client(),'access',
+                              dict(payload,requested_by=self._requester()) if retry_job_id else payload,
+                              dry,retry_job_id=retry_job_id)
         self.api_thread,self.api_worker = thread,worker
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -5503,6 +5519,25 @@ class AccessManager(QMainWindow):
             self._open_api_settings()
             if not self.api_config.get('api_key'):
                 return
+        retry_rows = {}
+        if not self.chk_dry.isChecked():
+            for row in range(self.table.rowCount()):
+                meta = self._row_metadata(row)
+                result = meta.get('result') or {}
+                parent = None
+                if result.get('status') in {'failed','partially_succeeded'} and result.get('executor_mode')=='powershell':
+                    parent = result.get('job_id')
+                elif result.get('status') in {None,'preview'}:
+                    parent = meta.get('_retry_parent_job_id') or meta.get('_failed_job_id')
+                if self._is_row_checked(row) and parent and not meta.get('bus_done'):
+                    retry_rows[row] = parent
+            if retry_rows and QMessageBox.question(self,'실패 작업 재실행',
+                    f'실패·부분 성공한 {len(retry_rows)}건을 새 Job으로 재실행할까요?\n'
+                    '폴더 등 실패 원인을 조치했는지 확인하세요.\n'
+                    '성공한 단계는 유지하고 실패한 단계와 이후 단계만 실행합니다.\n'
+                    '모든 단계가 실제 성공한 경우에만 BUS 완료가 가능합니다.',
+                    QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:
+                return
         self.stop_requested = False
         self._ignore_bus_results = False
         self._waiting_for_bus = False
@@ -5524,10 +5559,12 @@ class AccessManager(QMainWindow):
             payload = meta.get('payload') or make_access_payload(values,meta['request_id'],meta['source'],self._requester())
             meta['payload'] = payload
             meta['live_result'] = {}
+            if row in retry_rows:
+                meta['_retry_parent_job_id'] = retry_rows[row]
             if not self.chk_dry.isChecked():
                 meta['result'] = {}
             self._set_row_metadata(row,meta)
-            queue.append((row,payload,self.chk_dry.isChecked()))
+            queue.append((row,payload,self.chk_dry.isChecked(),retry_rows.get(row)))
         if not queue:
             return
         self.run_queue = queue
@@ -5615,6 +5652,13 @@ class AccessManager(QMainWindow):
         row = self.current_row
         meta = self._row_metadata(row)
         result = dict(result)
+        previous = meta.get('result') or {}
+        if result.get('status')=='preview':
+            if previous.get('status') in {'failed','partially_succeeded'} and previous.get('executor_mode')=='powershell':
+                meta['_failed_job_id'] = previous.get('job_id')
+        else:
+            meta.pop('_retry_parent_job_id',None)
+            meta.pop('_failed_job_id',None)
         meta['result'] = result
         self._set_row_metadata(row,meta)
         status = result.get('status')

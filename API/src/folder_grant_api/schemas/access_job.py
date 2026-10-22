@@ -86,6 +86,7 @@ class JobStepResponse(BaseModel):
 
 
 class JobResponse(BaseModel):
+    original_request_id: str | None = None
     job_id: str
     request_id: str
     replayed: bool = False

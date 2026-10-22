@@ -195,3 +195,14 @@ python -m test_client.main
 ```
 
 현재 버전은 수동 요청 추가, Preview, 다중 Job 등록, 상태 자동 조회, 취소 및 결과 로그를 제공합니다. Selenium BUS 조회 연결은 후속 단계입니다.
+
+
+### 실패한 권한 작업 재실행
+
+`POST /api/v1/access-jobs/{job_id}/retry`에 `{"requested_by":"operator"}`를 보내면 PowerShell 모드의 `failed`·`partially_succeeded` 권한 Job을 새 Job으로 재실행합니다. API Key 인증이 필요하며, 성공·진행 중·취소·Mock·신규 프로젝트 Job은 이 엔드포인트의 대상이 아닙니다.
+
+성공한 단계의 결과는 `reused_from_job_id`와 함께 보존하고 실패한 단계 및 미실행 단계만 다시 실행합니다. 기존 Job은 변경하지 않습니다. 같은 이전 Job에 대한 중복 접수는 하나의 재실행 Job을 반환합니다. 재실행도 실패하면 그 재실행 Job ID를 대상으로 다시 접수할 수 있습니다.
+
+응답의 `original_request_id`는 최초 요청번호입니다. `GET /api/v1/access-jobs/{job_id}`는 지정 이력 그대로, `GET /api/v1/access-jobs/by-request/{request_id}`와 원래 요청의 중복 등록 응답은 최신 재실행 Job을 반환합니다. 이 연결은 DB에 보존되며 기존 DB 테이블·컬럼 변경은 필요하지 않습니다. 서버·클라이언트 모두 업데이트 후 API 서비스를 재시작하세요. 이미 성공한 단계는 재검증하지 않으므로 해당 성공 상태를 외부에서 변경했다면 별도 확인이 필요합니다.
+
+재실행도 기존 in-process BackgroundTasks 실행기를 사용합니다. **서버 프로세스가 실행 도중 종료되어 queued/running 상태로 남은 작업은 이 기능이 자동 복구하지 않습니다.** 남아 있는 PowerShell 프로세스와 실제 권한 상태를 확인하지 않고 중복 실행하지 않도록, 진행 중·불확실한 작업은 재실행 대상으로 취급하지 않습니다. 완료된 재실행 이력의 원래 요청번호 연결은 서버 재시작 후에도 유지됩니다.

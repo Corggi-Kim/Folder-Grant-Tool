@@ -14,6 +14,10 @@ class JobNotCancellableError(RuntimeError):
     pass
 
 
+class JobNotRetryableError(RuntimeError):
+    pass
+
+
 class RequestIdConflictError(RuntimeError):
     pass
 
@@ -27,7 +31,7 @@ class JobService:
         if existing:
             if existing.request_payload != request.model_dump(mode="json"):
                 raise RequestIdConflictError(request.request_id)
-            return existing, True
+            return self.repository.latest_attempt(existing), True
         try:
             return self.repository.create(request, plan), False
         except DuplicateRequestError:
@@ -36,7 +40,7 @@ class JobService:
                 raise
             if existing.request_payload != request.model_dump(mode="json"):
                 raise RequestIdConflictError(request.request_id)
-            return existing, True
+            return self.repository.latest_attempt(existing), True
 
     def get(self, job_id: str) -> JobRecord:
         job = self.repository.get(job_id)
@@ -48,7 +52,14 @@ class JobService:
         job = self.repository.get_by_request_id(request_id)
         if job is None:
             raise JobNotFoundError(request_id)
-        return job
+        return self.repository.latest_attempt(job)
+
+    def retry(self,job_id: str,actor: str,executor_mode: str):
+        parent = self.get(job_id)
+        if (parent.operation not in {"grant","revoke"} or parent.status not in {"failed","partially_succeeded"}
+                or executor_mode!="powershell" or (parent.result_payload or {}).get("executor_mode")!="powershell"):
+            raise JobNotRetryableError(parent.status)
+        return self.repository.create_retry(parent,actor)
 
     def cancel(self, job_id: str, actor: str) -> JobRecord:
         job = self.get(job_id)
