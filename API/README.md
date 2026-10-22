@@ -82,12 +82,30 @@ Mock 검증 후 테스트 자원에 실제 작업을 적용할 때만 서버를 
 ```dotenv
 FGT_EXECUTOR_MODE=powershell
 FGT_POWERSHELL_PATH=powershell.exe
-FGT_POWERSHELL_TIMEOUT_SECONDS=300
+FGT_POWERSHELL_TIMEOUT_SECONDS=10800
 FGT_TEMPLATE_ROOT=\\LSK_S010\Study folder\_Template
 FGT_GROUP_OU_PATH=OU=Group Project Folder,OU=0.Management Object Group,OU=lskglobal,DC=lskglobal,DC=com
 ```
 
 PowerShell 모드는 기본 API Key인 `change-me`로 시작할 수 없습니다. 사용자 사번·프로젝트 코드·Level2·Level3를 제한된 형식으로 검증하고 서버가 허용된 작업 단계만 PowerShell 명령으로 변환합니다. API에서 임의 PowerShell 문자열은 받지 않습니다.
+
+### 오래된 과제의 장시간 ACL 작업
+
+PowerShell의 기본 실행 제한은 **단계당 10,800초(3시간)**입니다. 오래된 과제의 재귀 ACL 변경이 300초를 넘더라도 이 범위에서는 서버가 기다립니다. 클라이언트의 HTTP 요청 제한(30초)이나 전체 Job 조회 대기(4시간)와는 별도 설정입니다.
+
+기존 서버의 `.env`에 `FGT_POWERSHELL_TIMEOUT_SECONDS=300`이 있으면 코드 업데이트 후에도 그 값이 우선합니다. 다음과 같이 변경하고, 실행 중인 작업이 없는 상태에서 API 서비스를 재시작해야 적용됩니다.
+
+```dotenv
+FGT_POWERSHELL_TIMEOUT_SECONDS=10800
+```
+
+```powershell
+Restart-Service FolderGrantApi
+```
+
+수동 Uvicorn 실행이면 서버를 종료하고 다시 실행합니다. `POWERSHELL_TIMEOUT`은 단순한 클라이언트 조회 실패가 아니라 서버가 실행 제한에 도달하여 PowerShell 프로세스를 종료한 결과입니다. 일부 권한이 적용됐을 수 있으며 이후 단계는 실행되지 않습니다. 실행 제한을 늘려도 기존의 실패·부분 성공 Job은 자동으로 재개되거나 성공으로 바뀌지 않습니다.
+
+같은 `request_id`를 다시 등록하면 기존 Job을 반환하므로 재실행되지 않습니다. 해당 Job의 단계 결과와 실제 권한을 확인한 후, 재실행이 필요하면 별도의 새 `request_id`로 요청해야 합니다. 클라이언트의 **완료 처리**는 최신 상태를 조회할 뿐 권한 작업을 재등록하거나 실패를 성공으로 변경하지 않습니다.
 
 ## Windows 서비스 등록
 
