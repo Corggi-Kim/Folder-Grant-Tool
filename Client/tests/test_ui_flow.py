@@ -275,7 +275,7 @@ class UiFlowTests(unittest.TestCase):
         first = w._newdlg
         w.open_new_viewer()
         self.assertIs(w._newdlg,first)
-        self.assertEqual(sum(isinstance(x,self.m.NewItemsViewer) for x in w.children()),1)
+        self.assertEqual(len(w.findChildren(self.m.NewItemsViewer)),1)
         first.close()
 
     def test_stop_in_project_startup_does_not_register(self):
