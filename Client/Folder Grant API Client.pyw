@@ -3636,7 +3636,7 @@ class AccessManager(QMainWindow):
         QTableWidget QWidget {{background:transparent;}}
         QTableWidget::item {{padding:5px;border:0;}}
         QTableWidget::item:selected {{background:{t['select']};color:{t['text']};}}
-        QHeaderView::section {{background:{t['header']};color:{t['text']};border:0;border-right:1px solid {t['grid']};border-bottom:1px solid {t['border']};padding:7px 4px;font-size:12px;font-weight:600;}}
+        QHeaderView::section {{background:{t['header']};color:{t['text']};border:0;border-bottom:1px solid {t['border']};padding:7px 4px;font-size:12px;font-weight:600;}}
         QTableCornerButton::section {{background:{t['header']};border:1px solid {t['border']};}}
         QWidget#detailPanel {{background:{t['panel']};border:1px solid {t['border']};border-radius:5px;}}
         QLabel#stepIcon {{background:{t['badge']};color:{t['muted']};border-radius:12px;font-size:12px;}}
@@ -3802,12 +3802,6 @@ class AccessManager(QMainWindow):
         subtitle = QLabel('폴더 권한 관리'); subtitle.setObjectName('brandSubtitle')
         title.addWidget(self.brand_title); title.addWidget(subtitle)
         self.header_bar.addLayout(title)
-        self.version_badge = QLabel(APP_VERSION_STR); self.version_badge.setObjectName('versionBadge')
-        self.version_badge.setFixedHeight(26)
-        self.version_badge.setAlignment(Qt.AlignCenter)
-        self.build_label = QLabel(f'Build {APP_BUILD}'); self.build_label.setObjectName('mutedLabel')
-        self.header_bar.addWidget(self.version_badge)
-        self.header_bar.addWidget(self.build_label)
         self.header_bar.addStretch()
         self.settings_button = QToolButton(); self.settings_button.setObjectName('utilityButton')
         self.settings_button.setText('⚙'); self.settings_button.setToolTip('설정 및 도움말')
@@ -3986,8 +3980,15 @@ class AccessManager(QMainWindow):
         main.addWidget(self.actions_bar)
         self.summary_label = QLabel('전체 0건 · 실행 중 0 · 완료 0 · 확인 필요 0')
         self.summary_label.setObjectName('summaryLabel')
-        self.summary_label.setContentsMargins(20,0,20,12)
-        main.addWidget(self.summary_label)
+        footer = QWidget()
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(20,0,20,12)
+        footer_layout.addWidget(self.summary_label,1)
+        self.release_label = QLabel(f"V{APP_VERSION} Build:{APP_BUILD.replace('-','')}")
+        self.release_label.setObjectName('mutedLabel')
+        self.release_label.setAlignment(Qt.AlignRight|Qt.AlignVCenter)
+        footer_layout.addWidget(self.release_label)
+        main.addWidget(footer)
         self.setCentralWidget(root)
         self._statusbar = self.statusBar(); self._statusbar.hide()
         self.prg = QProgressBar(self); self.prg.hide()

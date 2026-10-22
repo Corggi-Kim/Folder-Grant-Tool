@@ -22,8 +22,11 @@ class DesignTests(unittest.TestCase):
     def test_version_and_build_are_visible_in_main_header(self):
         self.assertEqual(self.m.APP_VERSION,'1.1.0')
         self.assertEqual(self.m.APP_BUILD,'2026-10-22')
-        self.assertIn('1.1.0',self.window.version_badge.text())
-        self.assertIn('2026-10-22',self.window.build_label.text())
+        self.assertEqual(self.window.release_label.text(),'V1.1.0 Build:20261022')
+        self.show()
+        w = self.window
+        self.assertGreater(w.release_label.mapTo(w,self.m.QPoint(0,0)).y(),w.btn_stop.mapTo(w,self.m.QPoint(0,0)).y()+w.btn_stop.height())
+        self.assertEqual(w.release_label.alignment(),self.m.Qt.AlignRight|self.m.Qt.AlignVCenter)
 
     def test_approved_layout_has_right_inspector_and_bottom_actions(self):
         self.show()
@@ -200,3 +203,10 @@ class DesignTests(unittest.TestCase):
         self.assertLess(v.btn_manual.x(),v.btn_refresh.x())
         self.assertEqual(v.btn_refresh.objectName(),'primaryButton')
         self.assertNotEqual(v.btn_manual.objectName(),'primaryButton')
+
+    def test_horizontal_headers_have_no_vertical_separator(self):
+        for mode in ('light','dark'):
+            self.window.apply_theme(mode)
+            style = self.window.styleSheet().split('QHeaderView::section {',1)[1].split('}',1)[0]
+            self.assertNotIn('border-right:1px',style)
+            self.assertIn('border-bottom:1px',style)
