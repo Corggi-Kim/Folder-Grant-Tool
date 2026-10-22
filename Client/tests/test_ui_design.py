@@ -1,5 +1,6 @@
 """Rendered layout and interaction contracts for the approved desktop mockup."""
 import unittest
+import json
 from unittest.mock import Mock
 import test_ui_flow as fixtures
 
@@ -126,3 +127,30 @@ class DesignTests(unittest.TestCase):
         self.assertFalse(w.table.isColumnHidden(w.COL_ROLE))
         self.assertFalse(w.table.isColumnHidden(w.COL_LV3))
         self.assertEqual(w.table.horizontalHeaderItem(w.COL_LV2).text(),'Level2')
+
+    def test_theme_switch_persists_choice_in_both_directions(self):
+        w = self.window
+        for mode in ('dark','light'):
+            w.theme_switch.setChecked(mode=='dark')
+            self.assertEqual(w.current_theme,mode)
+            with open(self.m.CONF_FILE,encoding='utf-8') as handle:
+                self.assertEqual(json.load(handle)['theme'],mode)
+
+    def test_execution_clears_previous_live_progress_before_retry(self):
+        row = self.fixture.row()
+        w = self.window
+        meta = w._row_metadata(row)
+        meta['live_result'] = dict(status='running',steps=[dict(type='grant_acl',status='succeeded')])
+        w._set_row_metadata(row,meta)
+        w._start_next_job = Mock()
+        w.run_execute()
+        self.assertFalse(w._row_metadata(row).get('live_result'))
+
+    def test_project_results_refresh_header_mode(self):
+        w = self.window
+        viewer = self.m.NewItemsViewer(w)
+        viewer.set_data(['프로젝트코드','프로젝트명'],[['26-012','Test']])
+        viewer._on_project_result(0,dict(status='succeeded',executor_mode='powershell'))
+        self.assertIn('실제',w.execution_mode_label.text())
+        self.assertIn('연결됨',w.api_status_label.text())
+        viewer.close()

@@ -2872,6 +2872,8 @@ class NewItemsViewer(QDialog):
 
 
     def _on_project_result(self,row,result):
+        verified = result.get('executor_mode') in {'mock','powershell'} or result.get('status')=='preview'
+        self.host._set_api_connection_state(verified,result)
         col = self._hidx.get('프로젝트코드',-1)
         item = self.tbl.item(row,col) if col >= 0 else None
         if item:
@@ -3823,7 +3825,7 @@ class AccessManager(QMainWindow):
         self.header_bar.addWidget(self.btn_theme)
         self.theme_switch = ThemeSwitch(); self.theme_switch.setObjectName('themeSwitch')
         self.theme_switch.setToolTip('다크 테마')
-        self.theme_switch.toggled.connect(lambda checked:self.apply_theme('dark' if checked else 'light'))
+        self.theme_switch.toggled.connect(lambda checked:self._toggle_theme())
         self.header_bar.addWidget(self.theme_switch)
         self.btn_notif = QToolButton(self); self.btn_notif.hide()
         self.badge_notif = BadgeToolButton(self.settings_button,self)
@@ -5068,6 +5070,7 @@ class AccessManager(QMainWindow):
             # Keep the original operator when retrying the same idempotent payload.
             payload = meta.get('payload') or make_access_payload(values,meta['request_id'],meta['source'],self._requester())
             meta['payload'] = payload
+            meta['live_result'] = {}
             if not self.chk_dry.isChecked():
                 meta['result'] = {}
             self._set_row_metadata(row,meta)
