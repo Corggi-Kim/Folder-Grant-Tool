@@ -77,6 +77,14 @@ def render():
                 for _ in range(4):app.processEvents()
                 w.grab().save(str(output/f'client-busy-{mode}-v1.1.0.png'))
             w._set_running_ui(False)
+        if '--help' in __import__('sys').argv:
+            for mode in ('light','dark'):
+                w.apply_theme(mode)
+                help_dialog = m.HelpDialog(w)
+                help_dialog.show()
+                for _ in range(4):app.processEvents()
+                help_dialog.grab().save(str(output/f'client-help-{mode}-v1.1.0.png'))
+                help_dialog.close()
         if '--login' in __import__('sys').argv:
             login = m.BusLoginDialog('',w)
             login.show()
