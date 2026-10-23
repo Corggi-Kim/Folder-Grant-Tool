@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     executor_mode: Literal["mock", "powershell"] = "mock"
     powershell_path: str = "powershell.exe"
     powershell_timeout_seconds: int = 10800
+    validation_timeout_seconds: int = 20
     template_root: str = r"\\LSK_S010\Study folder\_Template"
     group_ou_path: str = r"OU=Group Project Folder,OU=0.Management Object Group,OU=lskglobal,DC=lskglobal,DC=com"
     share_root: str = r"\\LSK_S010\Study Folder\{proj_seg}\{lv2}\{lv3}"
@@ -36,6 +37,8 @@ class Settings(BaseSettings):
             raise ValueError("PowerShell 모드에서는 기본 API Key를 사용할 수 없습니다.")
         if self.powershell_timeout_seconds < 1:
             raise ValueError("PowerShell timeout은 1초 이상이어야 합니다.")
+        if not 1 <= self.validation_timeout_seconds <= 25:
+            raise ValueError("Validation timeout은 1~25초여야 합니다.")
         if not 1 <= self.port <= 65535:
             raise ValueError("API port는 1~65535 범위여야 합니다.")
 

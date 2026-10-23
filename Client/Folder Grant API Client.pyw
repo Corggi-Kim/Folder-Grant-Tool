@@ -85,13 +85,13 @@ HELP_PAGES = (
     ("처음 사용하기", (
         ("01 · 연결 확인", "프로그램을 켜면 서버 연결과 BUS 로그인 후 요청을 불러옵니다. 로그인창이 나오면 BUS 계정과 암호를 입력하세요. 계정 저장은 직접 선택할 수 있습니다."),
         ("02 · 요청 살펴보기", "권한 요청 또는 신규 프로젝트 탭에서 목록을 확인하세요. 행을 선택하면 오른쪽 선택 요청 상세에 해당 요청의 정보와 진행 상태가 표시됩니다."),
-        ("03 · 확인하고 실행", "처리할 항목의 체크박스를 선택하세요. 권한 요청은 미리보기로 먼저 확인한 뒤 선택 실행을 누르세요. 신규 프로젝트도 미리보기로 확인한 뒤 선택실행을 누르세요."),
+        ("03 · 확인하고 실행", "처리할 항목의 체크박스를 선택하세요. 권한 요청은 요청 검증으로 먼저 확인한 뒤 선택 실행을 누르세요. 신규 프로젝트도 요청 검증으로 확인한 뒤 선택실행을 누르세요."),
         ("04 · 완료 확인", "작업 결과를 목록과 오른쪽 상세에서 확인하세요. BUS 자동 완료 옵션을 켜 두면 실제 작업이 모두 성공한 BUS 요청만 완료 처리됩니다. 수동 입력과 엑셀로 추가한 항목은 BUS 완료 대상이 아닙니다."),
     )),
     ("버튼 안내", (
         ("권한 요청 · 목록 준비", "수동 입력은 직접 요청을 추가할 때, 엑셀 불러오기는 파일에 정리된 요청을 가져올 때 사용합니다. BUS 요청 조회를 누르면 BUS의 권한 요청을 다시 불러옵니다."),
         ("신규 프로젝트 · 목록 준비", "수동 추가로 프로젝트를 직접 입력하거나 BUS 신규조회로 프로젝트 생성 요청을 불러오세요. 필요한 항목을 체크한 뒤 아래의 선택 실행을 누르면 됩니다."),
-        ("미리보기 / 선택 실행", "미리보기는 처리할 내용을 확인하는 기능으로 실제 권한이나 폴더를 변경하지 않습니다. 선택 실행은 체크한 항목을 서버에 보내 처리합니다."),
+        ("요청 검증 / 선택 실행", "요청 검증은 API 서버에서 사용자·보안 그룹·요청 경로와 현재 ACL을 읽기 전용으로 확인합니다. 실제 권한이나 폴더를 변경하지 않으며 항목별 결과는 작업 로그에 표시합니다. 선택 실행은 체크한 항목을 서버에 보내 처리합니다."),
         ("BUS 완료 재확인", "권한 작업은 성공했는데 BUS 완료가 되지 않았을 때 사용하세요. 서버 결과를 다시 확인한 뒤 완료 처리를 시도합니다. 권한 작업 자체를 다시 실행하는 버튼은 아닙니다."),
         ("중지", "다음 항목의 실행을 멈추고 진행 중인 작업에 취소를 요청합니다. 이미 진행 중인 처리는 멈추기까지 시간이 걸릴 수 있으며, 적용된 권한이 자동으로 되돌아가지는 않습니다."),
     )),
@@ -599,7 +599,7 @@ class ApiJobWorker(QObject):
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, client: FolderGrantApiClient, kind: str, payload: dict, dry_run: bool = False, retry_job_id: str = None):
+    def __init__(self, client: FolderGrantApiClient, kind: str, payload: dict, dry_run: bool = False, retry_job_id: str = None, validate_only: bool = False):
         super().__init__()
         if kind not in {'access', 'project'}:
             raise ValueError('알 수 없는 API 작업 종류입니다.')
@@ -609,6 +609,7 @@ class ApiJobWorker(QObject):
         self._stop_event = threading.Event()
         self.job_id = None
         self.retry_job_id = retry_job_id
+        self.validate_only = validate_only
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -637,7 +638,28 @@ class ApiJobWorker(QObject):
         """Also used by the project batch worker in its own Qt thread."""
         path = '/api/v1/' + self.kind + '-jobs'
         if self._stop_event.is_set():
+            if self.validate_only:
+                return dict(status='validated',validation_status='unknown',request_id=self.payload['request_id'],client_stopped=True,
+                            checks=[dict(id='cancelled',label='실제 자원 검증',target='',status='unknown',message='요청 검증을 중지했습니다.')])
             return {'status': 'cancelled', 'client_stopped': True}
+        if self.validate_only:
+            try:
+                validation = self.client.request('POST', path + '/validate', self.payload)
+            except ApiClientError as exc:
+                if exc.status_code == 404:
+                    raise ApiClientError('요청 검증 API가 없습니다. API 서버를 업데이트하고 재시작하세요.', 404) from exc
+                raise
+            if (validation.get('request_id') != self.payload['request_id']
+                    or validation.get('validation_status') not in {'passed','failed','warning','unknown'}
+                    or not isinstance(validation.get('checks'), list) or not validation['checks']
+                    or any(not isinstance(check, dict) or check.get('status') not in
+                           {'passed','failed','warning','unknown','not_applicable'} for check in validation['checks'])):
+                raise ApiClientError('요청 검증 응답이 올바르지 않습니다. 실제 검증 결과를 확인하지 못했습니다.')
+            states = {check['status'] for check in validation['checks']}
+            expected = 'failed' if 'failed' in states else 'unknown' if 'unknown' in states else 'warning' if 'warning' in states else 'passed'
+            if validation['validation_status'] != expected:
+                raise ApiClientError('요청 검증 요약과 항목별 결과가 일치하지 않습니다.')
+            return {**validation, 'status':'validated', 'client_stopped':self._stop_event.is_set()}
         if self.dry_run:
             preview = self.client.request('POST', path + '/preview', self.payload)
             return {**preview, 'status': 'preview', 'client_stopped': self._stop_event.is_set()}
@@ -3093,7 +3115,7 @@ class NewItemsViewer(QDialog):
         btns = QHBoxLayout(self.actions_bar); btns.setContentsMargins(20,12,20,10)
         self.btn_create = QPushButton('선택실행'); self.btn_create.setObjectName('primaryButton')
         self.btn_create.clicked.connect(lambda: self._on_create_clicked(dry_run=False))
-        self.btn_preview = QPushButton('미리보기')
+        self.btn_preview = QPushButton('요청 검증')
         self.btn_preview.clicked.connect(lambda: self._on_create_clicked(dry_run=True))
 
         self.status_lbl = QLabel("")
@@ -3202,9 +3224,11 @@ class NewItemsViewer(QDialog):
     def _on_worker_progress(self, cur: int, total: int, message: str):
         self.status_lbl.setText(message)
         self._last_worker_msg = message
+        self.host._set_progress_status(message,done=cur,total=total,running=True)
 
     def _on_worker_finished(self,ok_cnt,fail_cnt):
-        self.status_lbl.setText(f'실제 성공 {ok_cnt} / 실패 {fail_cnt} — '+self._last_worker_msg)
+        prefix = '요청 검증 완료' if getattr(self,'_validation_running',False) else f'실제 성공 {ok_cnt} / 실패 {fail_cnt}'
+        self.status_lbl.setText(prefix+' — '+self._last_worker_msg)
 
 
     def _manual_add(self,proj,name):
@@ -3231,7 +3255,7 @@ class NewItemsViewer(QDialog):
         self.tbl.setCurrentCell(row,self._hidx['프로젝트코드'])
         self._refresh_project_detail()
         self._refresh_selection()
-        self.status_lbl.setText('수동 요청을 추가했습니다. 미리보기 또는 선택실행을 누르세요.')
+        self.status_lbl.setText('수동 요청을 추가했습니다. 요청 검증 또는 선택실행을 누르세요.')
 
 
     def _on_manual_clicked(self):
@@ -3352,7 +3376,7 @@ class NewItemsViewer(QDialog):
     def _project_result_label(result):
         if result.get('bus_done'):
             return 'BUS 완료'
-        return {'preview':'미리보기','succeeded':'서버 성공','failed':'실패',
+        return {'preview':'요청 검증','succeeded':'서버 성공','failed':'실패',
                 'cancelled':'중지됨','running':'실행 중','queued':'실행 대기'}.get(result.get('status'),'실행 대기')
 
     def _refresh_project_detail(self):
@@ -3372,11 +3396,13 @@ class NewItemsViewer(QDialog):
             self.detail_values[name] = value
         code_item = self.tbl.item(row,self._hidx.get('프로젝트코드',-1))
         meta = dict(code_item.data(Qt.UserRole) or {}) if code_item else {}
-        result = meta.get('result') or {}
-        lines = [self._project_result_label(result)]
+        result = meta.get('validation_result') if meta.get('show_validation') else meta.get('result') or {}
+        lines = [validation_label(result) if result.get('status')=='validated' else self._project_result_label(result)]
         for key,label in [('job_id','작업 ID'),('error_code','오류'),('message','메시지')]:
             if result.get(key):
                 lines.append(f'{label}: {result[key]}')
+        if result.get('status')=='validated':
+            lines.append('각 항목의 실제 조회 결과는 아래 작업 로그에서 확인하세요.')
         self.detail_result.setText('\n'.join(lines))
 
     def _toggle_all_rows(self, checked: bool):
@@ -3431,7 +3457,7 @@ class NewItemsViewer(QDialog):
             if not checkbox or not checkbox.isChecked() or not code_item:
                 continue
             meta = dict(code_item.data(Qt.UserRole) or {})
-            if meta.get('bus_done'):
+            if meta.get('bus_done') and not dry_run:
                 continue
             project = code_item.text().strip()
             name_item = self.tbl.item(row,name_col) if name_col >= 0 else None
@@ -3444,10 +3470,14 @@ class NewItemsViewer(QDialog):
         if not items:
             return
         parent.stop_requested = False
+        parent._progress_started_at = time.monotonic()
+        parent._progress_elapsed = 0.0
+        parent._progress_detail = '요청 검증 중' if dry_run else '프로젝트 생성 중'
+        parent.done_jobs = 0; parent.total_jobs = len(items)
         parent._set_running_ui(True)
         self.worker_thread = QThread(self)
         self.worker = CreateWorker(items,dict(parent.creds),parent._api_client(),
-                                   dry_run=dry_run,
+                                   dry_run=dry_run, validate_only=dry_run,
                                    auto_complete=self.chk_auto_complete.isChecked(),
                                    requested_by=parent._requester())
         self.worker.moveToThread(self.worker_thread)
@@ -3459,7 +3489,8 @@ class NewItemsViewer(QDialog):
         self.worker.finished.connect(self.worker_thread.quit,type=Qt.DirectConnection)
         self.worker_thread.finished.connect(self._project_thread_finished)
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
-        self._set_busy(True,'API 프로젝트 작업 시작')
+        self._validation_running = dry_run
+        self._set_busy(True,'요청 검증 시작' if dry_run else 'API 프로젝트 작업 시작')
         if parent.stop_requested or parent._closing:
             self.worker.stop()
         self.worker_thread.start()
@@ -3472,11 +3503,18 @@ class NewItemsViewer(QDialog):
         item = self.tbl.item(row,col) if col >= 0 else None
         if item:
             meta = dict(item.data(Qt.UserRole) or {})
-            meta.update(result=result,bus_done=result.get('bus_done',False))
+            if result.get('status') == 'validated':
+                meta.update(validation_result=result,show_validation=True)
+            else:
+                meta.pop('show_validation',None)
+                meta.update(result=result,bus_done=result.get('bus_done',False))
             item.setData(Qt.UserRole,meta)
             item.setToolTip(json.dumps(result,ensure_ascii=False,indent=2))
-        self.tbl.setItem(row,self._status_col,QTableWidgetItem(self._project_result_label(result)))
+        self.tbl.setItem(row,self._status_col,QTableWidgetItem(validation_label(result) if result.get('status')=='validated' else self._project_result_label(result)))
         self._refresh_project_detail()
+        if result.get('status') == 'validated':
+            self.host._log_validation(result,f'프로젝트 {item.text() if item else row+1}')
+            return
         self.host._log('프로젝트 결과: '+json.dumps(result,ensure_ascii=False,indent=2),
                        summary=self.host._api_log_summary(result,f'프로젝트 {item.text() if item else row+1}'))
 
@@ -3512,10 +3550,11 @@ class CreateWorker(QObject):
     finished = pyqtSignal(int, int)
     error = pyqtSignal(str)
 
-    def __init__(self,items,creds,client,dry_run=False,auto_complete=True,requested_by='client-operator',parent=None):
+    def __init__(self,items,creds,client,dry_run=False,auto_complete=True,requested_by='client-operator',parent=None,validate_only=False):
         super().__init__(parent)
         self.items,self.creds,self.client = items,creds,client
         self.dry_run,self.auto_complete,self.requested_by = dry_run,auto_complete,requested_by
+        self.validate_only = validate_only
         self._stop = False
         self._active_job = None
 
@@ -3895,25 +3934,27 @@ class CreateWorker(QObject):
                 request_id = item.get('request_id') or new_client_request_id()
                 payload = make_project_payload(item['proj'],item.get('name',''),request_id,source,self.requested_by)
                 cached = item.get('result',{})
-                if not self.dry_run and can_complete_bus(cached,source) and not item.get('bus_done'):
+                if not self.dry_run and not self.validate_only and can_complete_bus(cached,source) and not item.get('bus_done'):
                     result = dict(cached)
                 else:
-                    self._active_job = ApiJobWorker(self.client,'project',payload,self.dry_run)
+                    self._active_job = ApiJobWorker(self.client,'project',payload,self.dry_run,validate_only=self.validate_only)
                     if self._stop:
                         self._active_job.stop()
                     try:
                         result = self._active_job.execute()
                     except Exception as exc:
-                        result = dict(status='failed',error_message=str(exc))
+                        result = (dict(status='validated',validation_status='unknown',request_id=request_id,
+                                       checks=[dict(id='request',label='실제 자원 검증',target='',status='unknown',message=str(exc))])
+                                  if self.validate_only else dict(status='failed',error_message=str(exc)))
                     self._active_job = None
                 result = dict(result)
                 real_success = result.get('status')=='succeeded' and result.get('executor_mode')=='powershell'
                 if real_success:
                     ok_count += 1
-                elif result.get('status') not in {'preview','simulated'}:
+                elif result.get('status') not in {'preview','simulated','validated'}:
                     fail_count += 1
                 message = f"{item['proj']} API {result.get('status')}: {result.get('error_message') or ''}"
-                if self.auto_complete and can_complete_bus(result,source,self._stop or result.get('client_stopped',False)):
+                if self.auto_complete and not self.validate_only and can_complete_bus(result,source,self._stop or result.get('client_stopped',False)):
                     if not self.creds.get('id') or not self.creds.get('pw'):
                         result['bus_done'] = False
                         message += ' / BUS 계정 누락: 완료만 재시도 가능'
@@ -4075,7 +4116,14 @@ class RequestDelegate(FocuslessItemDelegate):
         painter.restore()
 
 
+def validation_label(result):
+    return {'passed':'요청 검증 통과','warning':'요청 검증 주의',
+            'failed':'요청 검증 실패','unknown':'요청 검증 확인 불가'}.get(result.get('validation_status'),'요청 검증 확인 불가')
+
+
 def request_status_presentation(status):
+    if status.startswith('요청 검증'):
+        return status, 'muted' if '통과' in status else 'blue' if status.endswith('중') else 'amber'
     if 'BUS 완료' == status:
         return 'BUS 완료','green'
     if '초과' in status or 'TIMEOUT' in status:
@@ -4088,8 +4136,8 @@ def request_status_presentation(status):
         return '모의 완료','muted'
     if status == 'API 성공' or status.startswith('서버 성공'):
         return '서버 성공','green'
-    if 'DryRun' in status or 'Preview' in status or '미리보기' in status:
-        return '미리보기','muted'
+    if 'DryRun' in status or 'Preview' in status or '요청 검증' in status:
+        return '요청 검증','muted'
     if '실행중' in status or '실행 중' in status:
         return '실행 중','blue'
     if '완료 처리중' in status:
@@ -4564,7 +4612,7 @@ class AccessManager(QMainWindow):
         self.chk_auto_complete = QCheckBox('성공 후 BUS 자동 완료'); self.chk_auto_complete.setChecked(True)
         self.chk_auto_complete.toggled.connect(lambda checked:setattr(self,'auto_complete_after_add',checked))
         self.chk_dry = QCheckBox('Dry Run',self); self.chk_dry.hide()
-        self.btn_preview = QPushButton('미리보기'); self.btn_preview.clicked.connect(self._preview_selected)
+        self.btn_preview = QPushButton('요청 검증'); self.btn_preview.clicked.connect(self._preview_selected)
         self.btn_run_execute = QPushButton('선택 실행'); self.btn_run_execute.setObjectName('primaryButton')
         self.btn_run_execute.clicked.connect(self._execute_selected)
         self.btn_run_complete = QPushButton('BUS 완료 재확인'); self.btn_run_complete.clicked.connect(self.run_complete)
@@ -4588,6 +4636,7 @@ class AccessManager(QMainWindow):
         self.setCentralWidget(root)
         self._statusbar = self.statusBar(); self._statusbar.hide()
         self.prg = QProgressBar(self); self.prg.hide()
+        self._progress_elapsed = 0.0
         self._progress_started_at = None; self._progress_detail = ''; self._progress_project = ''
         self._progress_done = 0; self._progress_total = 0; self._progress_running = False
         self._progress_timer = QTimer(self); self._progress_timer.setInterval(1000)
@@ -4596,9 +4645,9 @@ class AccessManager(QMainWindow):
 
 
     def _format_elapsed(self) -> str:
-        if not getattr(self, "_progress_started_at", None):
+        if getattr(self, "_progress_started_at", None) is None:
             return "00:00"
-        elapsed = max(0, int(time.time() - self._progress_started_at))
+        elapsed = max(0, int(time.monotonic() - self._progress_started_at)) if self._progress_running else int(self._progress_elapsed)
         minutes, seconds = divmod(elapsed, 60)
         hours, minutes = divmod(minutes, 60)
         if hours:
@@ -4613,10 +4662,12 @@ class AccessManager(QMainWindow):
             self._progress_total = max(0, int(total))
         self._progress_detail = detail or ""
         self._progress_project = project or ""
+        was_running = self._progress_running
         self._progress_running = bool(running)
 
-        if running and not getattr(self, "_progress_started_at", None):
-            self._progress_started_at = time.time()
+        if running and (not was_running or self._progress_started_at is None):
+            self._progress_elapsed = 0.0
+            self._progress_started_at = time.monotonic()
         if running and not self._progress_timer.isActive():
             self._progress_timer.start()
         self._refresh_progress_status()
@@ -4655,6 +4706,8 @@ class AccessManager(QMainWindow):
         self.prg.hide()
 
     def _finish_progress_status(self, detail: str = "완료", stopped: bool = False):
+        if self._progress_running and self._progress_started_at is not None:
+            self._progress_elapsed = max(0, time.monotonic() - self._progress_started_at)
         self._progress_running = False
         if self._progress_timer.isActive():
             self._progress_timer.stop()
@@ -5016,6 +5069,8 @@ class AccessManager(QMainWindow):
             if not self.api_config.get('api_key'):
                 return
         self._completion_targets = []
+        self._progress_started_at = time.monotonic()
+        self._progress_elapsed = 0.0
         thread = QThread(self)
         worker = ApiJobRefreshWorker(self._api_client(),requests)
         self.api_thread,self.api_worker = thread,worker
@@ -5034,6 +5089,7 @@ class AccessManager(QMainWindow):
     def _on_completion_refreshed(self,row,result):
         self._set_api_connection_state(True,result)
         meta = self._row_metadata(row)
+        meta.pop('show_validation',None)
         meta['result'] = dict(result)
         meta.pop('_retry_parent_job_id',None); meta.pop('_failed_job_id',None)
         self._set_row_metadata(row,meta)
@@ -5084,7 +5140,7 @@ class AccessManager(QMainWindow):
         self._bus_queue = targets
         self._bus_total = len(targets)
         self._bus_done = 0
-        self._progress_started_at = time.time()
+        self._progress_started_at = time.monotonic()
         self._set_running_ui(True)
         self._start_next_bus_item()
 
@@ -5334,7 +5390,10 @@ class AccessManager(QMainWindow):
             newdlg.worker.stop()
         if self.api_thread is None and not self.session.is_busy():
             self._set_running_ui(False)
-        self._finish_progress_status('중지 요청됨',stopped=True)
+        if self.api_thread is not None or (newdlg and newdlg.worker_thread is not None) or self.session.is_busy():
+            self._set_progress_status('중지 요청됨',running=True)
+        else:
+            self._finish_progress_status('중지 요청됨',stopped=True)
 
 
     def _set_running_ui(self, running: bool):
@@ -5349,6 +5408,9 @@ class AccessManager(QMainWindow):
                 getattr(self, "total_jobs", 0),
                 running=True,
             )
+
+        elif self._progress_running:
+            self._finish_progress_status('중지됨' if self.stop_requested else '완료',stopped=self.stop_requested)
 
         to_disable = [
             getattr(self, "btn_preview", None),
@@ -5396,17 +5458,20 @@ class AccessManager(QMainWindow):
         row,payload,dry = entry[:3]
         retry_job_id = entry[3] if len(entry)>3 else None
         self.current_row = row
+        meta = self._row_metadata(row)
+        meta.pop('show_validation',None)
+        self._set_row_metadata(row,meta)
         self.current_seq = self.done_jobs+1
         self.current_mode = 'add' if payload['operation']=='grant' else 'remove'
-        self.table.item(row,self.COL_STATUS).setText('Preview 조회 중' if dry else 'API 실행중')
-        self._log(f"API {'Preview' if dry else 'Job'} 요청: {payload['request_id']}",
-                  summary=f"{row+1}행 · 프로젝트 {self._get(row,self.COL_PROJ)}: {'미리보기' if dry else '권한 작업'} 요청")
+        self.table.item(row,self.COL_STATUS).setText('요청 검증 중' if dry else 'API 실행중')
+        self._log(f"API {'요청 검증' if dry else 'Job'} 요청: {payload['request_id']}",
+                  summary=f"{row+1}행 · 프로젝트 {self._get(row,self.COL_PROJ)}: {'요청 검증' if dry else '권한 작업'} 요청")
         if retry_job_id:
             self._log(f'실패 작업 재실행: 이전 job_id={retry_job_id}',summary=f'{row+1}행: 실패 단계 재실행 요청')
         thread = QThread(self)
         worker = ApiJobWorker(self._api_client(),'access',
                               dict(payload,requested_by=self._requester()) if retry_job_id else payload,
-                              dry,retry_job_id=retry_job_id)
+                              dry,retry_job_id=retry_job_id,validate_only=dry)
         self.api_thread,self.api_worker = thread,worker
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -5467,10 +5532,21 @@ class AccessManager(QMainWindow):
         else:
             self._log(f"수동 입력 추가: 구분={kind}, 요청={reqtype}, 사번={user}, 프로젝트={proj}, L2={lv2}, L3={lv3}, ROLE={'없음' if not role else role}")
 
+    def _log_validation(self, result, context):
+        self.log_toggle.setChecked(True)
+        self._log(json.dumps(result,ensure_ascii=False,indent=2),
+                  summary=f'{context}: {validation_label(result)}')
+        symbols = {'passed':'✓','failed':'✕','unknown':'?','warning':'!','not_applicable':'—'}
+        for check in result.get('checks',[]):
+            target = f" · {check['target']}" if check.get('target') else ''
+            self._log(f"{symbols.get(check.get('status'),'?')} {check.get('label','검사')}{target}: {check.get('message','')}")
+        for warning in result.get('warnings',[]):
+            self._log('안내: '+warning)
+
     @staticmethod
     def _api_log_summary(result,context):
         status = result.get('status','unknown')
-        label = {'preview':'미리보기 완료','simulated':'모의 실행 완료','succeeded':'성공',
+        label = {'preview':'요청 검증 완료','simulated':'모의 실행 완료','succeeded':'성공',
                  'partially_succeeded':'부분 성공','failed':'실패','cancelled':'중지됨',
                  'running':'실행 중','queued':'실행 대기'}.get(status,'결과 확인 필요')
         if result.get('bus_done'):
@@ -5814,7 +5890,7 @@ class AccessManager(QMainWindow):
         self.run_queue = queue
         self.total_jobs = len(queue)
         self.done_jobs = 0
-        self._progress_started_at = time.time()
+        self._progress_started_at = time.monotonic()
         self._set_running_ui(True)
         self._start_next_job()
 
@@ -5902,6 +5978,16 @@ class AccessManager(QMainWindow):
         row = self.current_row
         meta = self._row_metadata(row)
         result = dict(result)
+        if result.get('status') == 'validated':
+            meta['validation_result'] = result
+            meta['show_validation'] = True
+            self._set_row_metadata(row,meta)
+            self.table.item(row,self.COL_STATUS).setText(validation_label(result))
+            self._log_validation(result,f'{row+1}행 · 프로젝트 {self._get(row,self.COL_PROJ)}')
+            self.done_jobs += 1
+            self._refresh_detail()
+            return
+        meta.pop('show_validation',None)
         previous = meta.get('result') or {}
         if result.get('status')=='preview':
             if previous.get('status') in {'failed','partially_succeeded'} and previous.get('executor_mode')=='powershell':
@@ -5942,8 +6028,13 @@ class AccessManager(QMainWindow):
 
     def _on_api_error(self, message):
         self._set_api_connection_state(False)
-        self.table.item(self.current_row,self.COL_STATUS).setText('API 오류 (등록 결과 확인 필요)')
-        self._log(message,summary='API 요청 오류 · 상세 내용은 로그 파일을 확인하세요.')
+        checking = bool(self.api_worker and getattr(self.api_worker,'validate_only',False))
+        if checking:
+            meta = self._row_metadata(self.current_row)
+            meta.update(show_validation=True,validation_result=dict(status='validated',validation_status='unknown'))
+            self._set_row_metadata(self.current_row,meta)
+        self.table.item(self.current_row,self.COL_STATUS).setText('요청 검증 확인 불가' if checking else 'API 오류 (등록 결과 확인 필요)')
+        self._log(message,summary=('요청 검증 확인 불가: '+message) if checking else 'API 요청 오류 · 상세 내용은 로그 파일을 확인하세요.')
         self.done_jobs += 1
 
 
@@ -6010,7 +6101,7 @@ class AccessManager(QMainWindow):
                     checkbox.setProperty('summaryConnected',True)
             status = self._get(row,self.COL_STATUS)
             text,tone = request_status_presentation(status)
-            running += int(tone=='blue' and text!='미리보기')
+            running += int(tone=='blue' and text!='요청 검증')
             completed += int(tone=='green')
             attention += int(tone in {'red','amber'})
         self.selection_label.setText(f'선택 {selected}건')
@@ -6039,8 +6130,8 @@ class AccessManager(QMainWindow):
         values = self._row_values(row) if valid else {}
         meta = self._row_metadata(row) if valid else {}
         result = meta.get('result') or {}
-        if not result and '실행중' in self._get(row,self.COL_STATUS):
-            result = meta.get('live_result') or {}
+        if '실행중' in self._get(row,self.COL_STATUS):
+            result = meta.get('live_result') or (result if result.get('status')=='running' else {})
         self.detail_project.setText(values.get('proj') or '—')
         self.detail_employee.setText(values.get('user') or '—')
         access = values.get('req','')
@@ -6051,12 +6142,15 @@ class AccessManager(QMainWindow):
         self.detail_department.setText(self._get(row,self.COL_DEPT) if valid else '')
         extra = ' · '.join(x for x in (self.detail_name.text(),self.detail_department.text()) if x)
         self.detail_extra.setText(extra); self.detail_extra.setVisible(bool(extra))
+        validation = meta.get('validation_result') if meta.get('show_validation') else None
         raw_steps = result.get('steps') or []
         statuses = ['queued']*4
         if result.get('job_id') or result.get('valid'):
             statuses[0] = 'succeeded'
         if valid and '검증실패' in self._get(row,self.COL_STATUS):
             statuses[0] = 'failed'
+        if validation:
+            statuses[0] = 'succeeded' if validation.get('validation_status')=='passed' else 'failed' if validation.get('validation_status')=='failed' else 'queued'
         groups = [s for s in raw_steps if any(k in s.get('type','') for k in ('group','member'))]
         acls = [s for s in raw_steps if s not in groups]
         def phase(steps):
@@ -6084,18 +6178,12 @@ class AccessManager(QMainWindow):
             self.detail_banner_title.setText('서버 작업 진행 중' if tone=='blue' and 'BUS' not in shown else shown)
             message = result.get('error_message') or result.get('error_code') or ''
             if result.get('status')=='running':
-                started = result.get('started_at')
                 elapsed = self._format_elapsed()
-                if started:
-                    try:
-                        when = datetime.datetime.fromisoformat(started.replace('Z','+00:00'))
-                        if when.tzinfo is None: when = when.replace(tzinfo=datetime.timezone.utc)
-                        seconds = max(0,int((datetime.datetime.now(datetime.timezone.utc)-when).total_seconds()))
-                        elapsed = f'{seconds//60:02d}:{seconds%60:02d}'
-                    except (ValueError,TypeError): pass
-                message = f'경과 {elapsed} · 최종 결과 대기'
+                message = f'이번 요청 경과 {elapsed} · 최종 결과 대기'
             if not message:
                 message = '서버 실제 성공 후에만 BUS 완료 가능' if meta.get('source')=='bus' else '선택한 요청의 서버 결과를 표시합니다.'
+            if validation:
+                message = '아래 작업 로그에서 각 항목의 실제 조회 결과를 확인하세요. 검증은 권한을 변경하지 않습니다.'
             self.status_label.setText(message)
         else:
             self.detail_banner_title.setText('선택 요청 대기')

@@ -35,12 +35,14 @@ pytest
 | `GET` | `/health` | 프로세스 상태 확인 |
 | `GET` | `/ready` | SQLite 연결을 포함한 준비 상태 확인 |
 | `POST` | `/api/v1/access-jobs/preview` | 실제 변경 없이 권한 작업 계획 생성 |
+| `POST` | `/api/v1/access-jobs/validate` | 실제 사용자·그룹·폴더·현재 ACL 읽기 전용 조회 |
 | `POST` | `/api/v1/access-jobs` | 설정된 Mock/PowerShell 모드로 Job 등록, `request_id` 중복 방지 |
 | `GET` | `/api/v1/access-jobs/{job_id}` | 작업과 단계별 상태 조회 |
 | `GET` | `/api/v1/access-jobs/by-request/{request_id}` | 요청번호로 작업 조회 |
 | `POST` | `/api/v1/access-jobs/{job_id}/cancel` | 대기/실행 중 작업 취소 요청 |
 | `POST` | `/api/v1/access-jobs/{job_id}/retry` | 실제 실패·부분 성공 권한 Job의 미완료 단계 재실행 |
 | `POST` | `/api/v1/project-jobs/preview` | 신규 프로젝트 그룹·폴더 생성 계획 확인 |
+| `POST` | `/api/v1/project-jobs/validate` | 그룹·생성 위치·템플릿 구조·기존 폴더 읽기 전용 검증 |
 | `POST` | `/api/v1/project-jobs` | 신규 프로젝트 생성 Job 등록 |
 | `GET` | `/api/v1/project-jobs/{job_id}` | 신규 프로젝트 Job 상태 조회 |
 | `GET` | `/api/v1/project-jobs/by-request/{request_id}` | 요청번호로 신규 프로젝트 Job 조회 |
@@ -111,6 +113,21 @@ Restart-Service FolderGrantApi
 수동 Uvicorn 실행이면 서버를 종료하고 다시 실행합니다. `POWERSHELL_TIMEOUT`은 단순한 클라이언트 조회 실패가 아니라 서버가 실행 제한에 도달하여 PowerShell 프로세스를 종료한 결과입니다. 일부 권한이 적용됐을 수 있으며 이후 단계는 실행되지 않습니다. 실행 제한을 늘려도 기존의 실패·부분 성공 Job은 자동으로 재개되거나 성공으로 바뀌지 않습니다.
 
 같은 `request_id`를 다시 등록하면 기존 또는 최신 재실행 Job을 반환하므로 권한을 다시 실행하지 않습니다. 원인과 실제 권한을 확인한 뒤 **실패한 권한 작업 재실행** 절차의 `/retry`를 사용하세요. 정식 Client에서는 실패·부분 성공 항목을 선택하고 **선택 실행**의 재실행 안내를 확인합니다. 임의 새 요청번호로 중복 접수하지 마세요. **BUS 완료 재확인**은 서버 결과를 조회하고 BUS 완료만 처리하며 권한 작업을 재등록하지 않습니다.
+
+## 실제 요청 검증
+
+정식 Client의 **요청 검증**은 `/api/v1/access-jobs/validate` 또는 `/api/v1/project-jobs/validate`를 호출합니다. 본문은 해당 Job 등록과 같은 입력 모델을 사용하며 API Key가 필요합니다. 기존 `/preview`는 실행 계획 계산용으로 유지하고 실제 자원을 조회하지 않습니다.
+
+- 권한 요청: AD 사용자, 보안 그룹, 현재 직접 가입, 프로젝트 Level1·Level2·Level3, Role 대상 하위 폴더와 현재 ACL을 조회합니다. ETC는 그룹만, 종료 과제는 Closed·Archive 후보를 확인합니다.
+- 신규 프로젝트: 그룹 존재·생성 OU, 공유 경로, 프로젝트·Study, 새로 복사할 때 필요한 템플릿·Study을 확인합니다. 기본 All 폴더는 별도 검증에서 제외합니다. 새 그룹·프로젝트 폴더가 없으면 생성 예정으로 표시하며 기존 자원 재사용 시 불필요한 템플릿·OU 검사를 생략합니다.
+- 검증은 **API 서비스 계정**으로 읽기 전용 수행합니다. AD·ACL 변경, 파일 생성·삭제·복사, Job 등록과 BUS 완료는 하지 않습니다.
+- Mock 모드는 실제 조회를 하지 않고 `unknown`과 안내를 반환합니다. PowerShell 모드에서도 검증 경로는 읽기 전용입니다.
+- 응답은 `validation_status`(passed / failed / warning / unknown), `checked_at`, `checked_by`, `checks`와 `warnings`를 반환합니다. 각 checks에는 id·label·target·status·message가 있으며 해당 없는 검사는 not_applicable입니다. 대상 없음과 접근·조회 실패를 구분합니다.
+- 현재 ACL은 사용자·프로젝트 그룹과 일치하는 ACE를 보여 주는 참고 정보입니다. 중첩 그룹을 포함한 유효 권한 계산이나 실제 변경 권한 보장은 아닙니다. 검증 후 환경이 바뀔 수도 있습니다.
+
+`FGT_VALIDATION_TIMEOUT_SECONDS=20`은 검증 전체 PowerShell 조회의 제한입니다(1~25초). 실제 작업의 단계당 10800초와 별도이며 Client HTTP 30초보다 짧게 제한합니다. 제한 초과·응답 이상은 확인 불가로 처리합니다. 전체 파일 트리를 재귀 검사하지 않습니다.
+
+API와 Client를 함께 업데이트하고 서비스를 재시작하세요. 구버전 서버에는 검증 API가 없어 Client에서 업데이트 안내를 표시합니다. 이 기능은 DB 스키마 변경이 없습니다. 사용자 수정 Word·PPT는 자동 갱신하지 않았습니다.
 
 ## Windows 서비스 등록
 
