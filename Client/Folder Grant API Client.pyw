@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem, QAbstractItemView, QVBoxLayout, QWidget, QTextEdit, QHBoxLayout,
     QLabel, QHeaderView, QCheckBox, QMenu, QToolButton, QMessageBox, QStyleOptionButton,
     QStyle, QDialog, QLineEdit, QComboBox, QDialogButtonBox, QFormLayout, QStatusBar,
-    QScrollArea, QSpinBox, QProgressBar, QAbstractButton, QTabBar, QStackedWidget, QAction, QStyledItemDelegate, QStyleOptionViewItem, QStyleOptionTab
+    QTabWidget, QScrollArea, QSpinBox, QProgressBar, QAbstractButton, QTabBar, QStackedWidget, QAction, QStyledItemDelegate, QStyleOptionViewItem, QStyleOptionTab
 )
 from PyQt5.QtGui import QFont, QGuiApplication, QKeySequence, QPainter, QTextOption, QTextCursor, QPixmap, QIcon, QColor, QPen, QPainterPath
 from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QTimer, QPoint, QSize
@@ -81,27 +81,81 @@ THEMES = {'light': {'bg': '#f4f6fa',
           'red': '#fb7185',
           'disabled': '#6c788c'}}
 
-HELP_TEXT = r"""[Folder Grant API Client 사용 안내]
+HELP_PAGES = (
+    ("처음 사용하기", (
+        ("01 · 연결 확인", "프로그램을 켜면 서버 연결과 BUS 로그인 후 요청을 불러옵니다. 로그인창이 나오면 BUS 계정과 암호를 입력하세요. 계정 저장은 직접 선택할 수 있습니다."),
+        ("02 · 요청 살펴보기", "권한 요청 또는 신규 프로젝트 탭에서 목록을 확인하세요. 행을 선택하면 오른쪽 선택 요청 상세에 해당 요청의 정보와 진행 상태가 표시됩니다."),
+        ("03 · 확인하고 실행", "처리할 항목의 체크박스를 선택하세요. 권한 요청은 미리보기로 먼저 확인한 뒤 선택 실행을 누르세요. 신규 프로젝트는 미리보기 (Dry Run)를 선택해 확인하고, 실제 처리할 때는 해제한 뒤 선택 실행을 누르세요."),
+        ("04 · 완료 확인", "작업 결과를 목록과 오른쪽 상세에서 확인하세요. BUS 자동 완료 옵션을 켜 두면 실제 작업이 모두 성공한 BUS 요청만 완료 처리됩니다. 수동 입력과 엑셀로 추가한 항목은 BUS 완료 대상이 아닙니다."),
+    )),
+    ("버튼 안내", (
+        ("권한 요청 · 목록 준비", "수동 입력은 직접 요청을 추가할 때, 엑셀 불러오기는 파일에 정리된 요청을 가져올 때 사용합니다. BUS 요청 조회를 누르면 BUS의 권한 요청을 다시 불러옵니다."),
+        ("신규 프로젝트 · 목록 준비", "수동 추가로 프로젝트를 직접 입력하거나 BUS 신규조회로 프로젝트 생성 요청을 불러오세요. 필요한 항목을 체크한 뒤 아래의 선택 실행을 누르면 됩니다."),
+        ("미리보기 / 선택 실행", "미리보기는 처리할 내용을 확인하는 기능으로 실제 권한이나 폴더를 변경하지 않습니다. 선택 실행은 체크한 항목을 서버에 보내 처리합니다."),
+        ("BUS 완료 재확인", "권한 작업은 성공했는데 BUS 완료가 되지 않았을 때 사용하세요. 서버 결과를 다시 확인한 뒤 완료 처리를 시도합니다. 권한 작업 자체를 다시 실행하는 버튼은 아닙니다."),
+        ("중지", "다음 항목의 실행을 멈추고 진행 중인 작업에 취소를 요청합니다. 이미 진행 중인 처리는 멈추기까지 시간이 걸릴 수 있으며, 적용된 권한이 자동으로 되돌아가지는 않습니다."),
+    )),
+    ("문제 해결", (
+        ("부분 성공은 어떤 뜻인가요?", "일부 단계만 처리된 상태입니다. 예를 들어 그룹에 사용자를 추가했지만 폴더 권한 적용에는 실패했을 수 있습니다. 오른쪽 상세에서 실패한 단계와 이유를 확인하세요. 이 상태에서는 BUS를 완료 처리하지 않습니다."),
+        ("문제를 고친 뒤 다시 실행하려면?", "폴더 누락 등 표시된 원인을 먼저 해결하세요. 실패하거나 부분 성공한 권한 요청을 체크하고 선택 실행을 누른 뒤 재시도 안내를 확인하세요. 이전에 성공한 단계는 유지하고 남은 단계를 다시 처리합니다."),
+        ("시간 초과 또는 결과 확인이 안 될 때", "오래 걸리는 작업은 아직 처리 중일 수 있습니다. 권한 요청의 BUS 완료 재확인으로 서버 상태를 확인하세요. 실패가 확인되면 원인을 해결한 뒤 재시도하고, 결과가 확실하지 않다면 중복 실행 전에 관리자에게 확인하세요."),
+        ("목록이 비어 있거나 조회에 실패했을 때", "상단의 서버 연결과 BUS 로그인 상태를 확인하고 해당 탭의 BUS 조회 버튼을 눌러 주세요. 연결 정보나 계정이 바뀌었다면 톱니바퀴 메뉴의 설정에서 수정할 수 있습니다."),
+        ("BUS 요청을 직접 수정할 때", "BUS에서 가져온 행의 내용을 편집하면 수동 요청으로 바뀌고 이전 성공 결과는 사용할 수 없게 됩니다. 수정한 항목은 BUS 자동 완료 대상에서 제외됩니다."),
+    )),
+    ("설정과 기록", (
+        ("연결과 로그인 설정", "오른쪽 위 톱니바퀴 메뉴에서 서버 주소, API Key와 BUS 로그인 정보를 관리하세요. API Key는 관리자에게 받은 값을 입력합니다. 저장한 API Key는 이 PC의 설정 파일에 평문으로 보관됩니다."),
+        ("숨겨진 정보 확인과 화면 테마", "이름·부서·Role 열은 톱니바퀴 메뉴의 상세 열 표시에서 볼 수 있습니다. 화면의 밝기는 오른쪽 위 달 또는 해 모양 아이콘으로 바꿀 수 있습니다."),
+        ("작업 로그와 상세 기록", "화면 아래 작업 로그에는 처리 결과를 짧게 보여줍니다. 오류 원인을 자세히 확인할 때는 C:\\FGT\\Log\\access.log 파일을 확인하세요. 같은 파일에 날짜와 시간을 포함해 계속 기록합니다. 로그 지우기는 화면의 로그만 비웁니다."),
+        ("다운로드한 파일", "BUS에서 내려받은 파일은 C:\\FGT\\ef 폴더에서 확인할 수 있습니다."),
+    )),
+)
 
-1) API 설정: 서버 주소와 X-API-Key를 입력하고 연결 확인 후 저장합니다.
-   설정 파일은 C:\FGT\conf\api_client.json이며 API Key가 평문 저장됩니다.
-2) 설정: 기존 BUS 로그인 계정을 입력합니다.
-3) 요청 확인: BUS 진행·종료 권한 요청을 조회합니다.
-4) 신규 프로젝트 탭: BUS 프로젝트 생성 요청을 조회합니다. 수동 추가도 가능합니다.
-5) 파일 선택 또는 수동 입력: API 작업용 요청을 추가합니다. BUS 완료 대상은 아닙니다.
-6) 선택 실행: 서버 API에 권한 작업을 등록하고 최종 Job 결과를 표시합니다.
-   클라이언트에서는 AD·폴더 권한 명령을 실행하지 않습니다.
-7) 미리보기: 서버 Preview만 호출합니다. 실제 Job과 BUS 완료 처리를 실행하지 않습니다.
-8) BUS 완료 재확인: 서버 상태를 다시 조회하고 실제 PowerShell 성공인 경우에만 허용합니다.
-   Mock·Preview·부분 성공·실패·취소는 BUS 완료 대상에서 제외됩니다.
-   서버 성공 후 BUS 완료가 실패했으면 완료 처리만 다시 실행하세요.
-9) 중지: 새 작업 등록을 멈추고 실행 Job에 취소를 요청합니다.
-   이미 실행 중인 서버 PowerShell 단계는 즉시 종료되지 않을 수 있습니다.
-10) BUS 조회 행을 편집하면 수동 요청으로 전환합니다. 기존 성공 결과는 무효화됩니다.
-11) 로그: C:\FGT\Log\access.log, 다운로드: C:\FGT\ef
-12) 테마는 상단 아이콘/스위치로 전환합니다. 설정은 톱니바퀴 메뉴에 있습니다.
-13) 이름·부서·Role 편집은 톱니바퀴의 상세 열 표시를 사용합니다. 상세 절차는 Client/README.md를 확인하세요.
-"""
+
+class HelpDialog(QDialog):
+    """User-facing task guide, using the same palette as the main window."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("사용 안내")
+        self.resize(800, 660)
+        t = THEMES[getattr(parent, 'current_theme', 'light')]
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 18)
+        layout.setSpacing(14)
+        title = QLabel("Folder Grant 사용 안내", self)
+        title.setStyleSheet("font-size:22px;font-weight:700;background:transparent;")
+        layout.addWidget(title)
+        subtitle = QLabel("요청 확인부터 완료 처리까지, 필요한 안내를 골라 보세요.", self)
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet(f"color:{t['muted']};background:transparent;")
+        layout.addWidget(subtitle)
+        self.tabs = QTabWidget(self)
+        self.tabs.setDocumentMode(True)
+        layout.addWidget(self.tabs, 1)
+        for label, cards in HELP_PAGES:
+            page = QTextEdit(self.tabs)
+            page.setReadOnly(True)
+            page.setFrameShape(QTextEdit.NoFrame)
+            page.document().setDefaultStyleSheet(
+                f"body {{color:{t['text']};font-size:13px;}} "
+                "h3 {font-size:15px;margin-top:0px;margin-bottom:8px;} "
+                "p {margin-top:0px;margin-bottom:0px;line-height:150%;}")
+            parts = []
+            for heading, body in cards:
+                parts.append(f'<table width="100%" cellspacing="0" cellpadding="14" '
+                             f'bgcolor="{t["panel"]}"><tr><td>'
+                             f'<h3 style="color:{t["accent"]}">{htmllib.escape(heading)}</h3>'
+                             f'<p>{htmllib.escape(body)}</p></td></tr></table><p style="font-size:8px">&nbsp;</p>')
+            page.setHtml('<html><body>'+''.join(parts)+'</body></html>')
+            self.tabs.addTab(page, label)
+        buttons = QDialogButtonBox(self)
+        close = buttons.addButton("닫기", QDialogButtonBox.RejectRole)
+        close.setDefault(True)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.setStyleSheet(f"QDialog {{background:{t['bg']};color:{t['text']};}} "
+                           f"QTextEdit {{background:{t['bg']};color:{t['text']};padding:10px 0px;}} "
+                           "QTabBar::tab {padding:10px 14px;min-height:22px;} "
+                           f"QTabBar::tab:selected {{color:{t['accent']};border-bottom:2px solid {t['accent']};}}")
 
 
 LOG_DIR = r"C:\FGT\Log"
@@ -4038,19 +4092,7 @@ class AccessManager(QMainWindow):
     EDITABLE_COLS = {COL_KIND, COL_REQTYPE, COL_USER, COL_NAME, COL_PROJ, COL_LV2, COL_LV3, COL_DEPT, COL_ROLE}
 
     def _show_help(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("기능 설명")
-        edit = QTextEdit(dlg)
-        edit.setReadOnly(True)
-        edit.setPlainText(HELP_TEXT)
-        btns = QDialogButtonBox(QDialogButtonBox.Close, parent=dlg)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        lay = QVBoxLayout(dlg)
-        lay.addWidget(edit)
-        lay.addWidget(btns)
-        dlg.resize(720, 560)
-        dlg.exec_()
+        HelpDialog(self).exec_()
 
     def apply_theme(self,mode):
         mode = mode if mode in THEMES else 'light'
