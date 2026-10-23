@@ -195,7 +195,7 @@ class UiFlowTests(unittest.TestCase):
         self.assertEqual([x['row'] for x in self.completed],[row])
         self.assertEqual(w._row_metadata(row)['result']['job_id'],'J1')
 
-    def test_editing_bus_request_removes_completion_authority(self):
+    def test_programmatic_bus_change_invalidates_completion_authority(self):
         row = self.row(result=dict(status='succeeded',executor_mode='powershell'))
         self.window.table.item(row,self.window.COL_PROJ).setText('26-013')
         meta = self.window._row_metadata(row)
