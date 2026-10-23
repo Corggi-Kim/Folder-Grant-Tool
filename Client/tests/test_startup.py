@@ -185,7 +185,7 @@ class StartupTests(unittest.TestCase):
         w.ensure_bus_session_async.assert_called_once()
         from pathlib import Path
         path = Path(self.m.CONF_FILE)
-        self.assertFalse(path.exists())
+        self.assertNotIn('secret with space ',path.read_text(encoding='utf-8'))
 
     def test_cancelled_startup_login_does_not_start_bus(self):
         w = self.window; w.creds = {'id':'','pw':''}; dialog = self.make_dialog()
@@ -226,7 +226,7 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(w.creds['id'],'correct-user')
         w.ensure_bus_session_async.assert_called_once()
 
-    def test_startup_login_save_choice_is_applied_after_success_and_preserves_other_settings(self):
+    def test_startup_login_save_choice_uses_existing_settings_behavior_and_preserves_other_settings(self):
         import json
         w = self.window; w.creds = {'id':'','pw':''}
         with open(self.m.CONF_FILE,'w',encoding='utf-8') as handle:
@@ -239,7 +239,7 @@ class StartupTests(unittest.TestCase):
         with patch.object(self.m,'BusLoginDialog',return_value=login):
             dialog._api_ready({'ready':{}})
         with open(self.m.CONF_FILE,encoding='utf-8') as handle:
-            self.assertNotIn('pw',json.load(handle))
+            self.assertEqual(json.load(handle)['pw'],'saved-secret')
         callbacks[0](True)
         with open(self.m.CONF_FILE,encoding='utf-8') as handle: saved = json.load(handle)
         self.assertEqual(saved['pw'],'saved-secret')
@@ -264,7 +264,7 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(saved['theme'],'dark')
         self.assertEqual(w.creds['pw'],'session-password')
 
-    def test_failed_login_does_not_persist_checked_save_choice(self):
+    def test_login_save_choice_matches_settings_even_when_authentication_fails(self):
         from pathlib import Path
         w = self.window; w.creds = {'id':'','pw':''}
         dialog = self.make_dialog(); dialog.active = True; dialog.stage = 0
@@ -272,5 +272,40 @@ class StartupTests(unittest.TestCase):
         login = Mock(); login.exec_.return_value = self.m.QDialog.Accepted
         login.values.return_value = ('bad-user','bad-password'); login.remember.isChecked.return_value = True
         with patch.object(self.m,'BusLoginDialog',return_value=login): dialog._api_ready({'ready':{}})
-        self.assertFalse(Path(self.m.CONF_FILE).exists())
+        self.assertIn('bad-password',Path(self.m.CONF_FILE).read_text(encoding='utf-8'))
         self.assertNotIn('bad-password',w.log.toPlainText())
+
+    def test_changed_credentials_never_reuse_an_authenticated_driver(self):
+        manager = self.m.BusSessionManager(self.fixture.tmp.name)
+        old_driver = Mock(); manager.driver = old_driver; manager._ready = True
+        manager._authenticated_credentials = ('old-user','old-password')
+        manager.set_creds('new-user','new-password')
+        self.assertFalse(manager.is_ready())
+        manager.MAX_INIT_RETRY = 1
+        outcomes = []; manager.readyChanged.connect(lambda ok,msg:outcomes.append(ok))
+        with patch.object(self.m.webdriver,'Chrome',side_effect=RuntimeError('login failed')):
+            manager.start()
+        old_driver.quit.assert_called_once()
+        self.assertEqual(outcomes,[False])
+        self.assertFalse(manager.is_busy())
+
+    def test_login_retries_emit_failure_only_after_all_attempts_finish(self):
+        manager = self.m.BusSessionManager(self.fixture.tmp.name); manager.set_creds('user','password')
+        manager.INIT_RETRY_BASE_DELAY = 0
+        outcomes = []; manager.readyChanged.connect(lambda ok,msg:outcomes.append(ok))
+        def fail(**kwargs):
+            self.assertTrue(manager.is_busy())
+            raise RuntimeError('login failed')
+        with patch.object(self.m.webdriver,'Chrome',side_effect=fail) as chrome:
+            manager.start()
+        self.assertEqual(chrome.call_count,manager.MAX_INIT_RETRY)
+        self.assertEqual(outcomes,[False])
+        self.assertFalse(manager.is_busy())
+
+    def test_general_settings_does_not_recheck_save_for_session_only_credentials(self):
+        w = self.window; w.creds = {'id':'session-user','pw':'session-password'}
+        w._remember_credentials = False
+        settings = Mock(); settings.exec_.return_value = self.m.QDialog.Rejected
+        with patch.object(self.m,'SettingsDialog',return_value=settings) as factory:
+            w._open_settings()
+        self.assertFalse(factory.call_args.kwargs['remembered'])
