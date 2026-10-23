@@ -167,3 +167,110 @@ class StartupTests(unittest.TestCase):
         w.session.is_busy.return_value = False
         self.wait(lambda:w._load_new_items.called)
         dialog.open_main()
+
+    def test_startup_missing_credentials_uses_login_dialog_and_preserves_settings(self):
+        w = self.window; w.creds = {'id':'','pw':'','debug':True,'remove_fail_tol':7}
+        dialog = self.make_dialog(); dialog.active = True; dialog.stage = 0
+        w._open_settings = Mock(); w.ensure_bus_session_async = Mock()
+        login = Mock(); login.exec_.return_value = self.m.QDialog.Accepted
+        login.values.return_value = ('operator','secret with space ')
+        login.remember.isChecked.return_value = False
+        with patch.object(self.m,'BusLoginDialog',return_value=login):
+            dialog._api_ready({'ready':{}})
+        w._open_settings.assert_not_called()
+        self.assertEqual(w.creds['id'],'operator')
+        self.assertEqual(w.creds['pw'],'secret with space ')
+        self.assertTrue(w.creds['debug'])
+        self.assertEqual(w.creds['remove_fail_tol'],7)
+        w.ensure_bus_session_async.assert_called_once()
+        from pathlib import Path
+        path = Path(self.m.CONF_FILE)
+        self.assertFalse(path.exists())
+
+    def test_cancelled_startup_login_does_not_start_bus(self):
+        w = self.window; w.creds = {'id':'','pw':''}; dialog = self.make_dialog()
+        dialog.active = True; dialog.stage = 0; w.ensure_bus_session_async = Mock()
+        login = Mock(); login.exec_.return_value = self.m.QDialog.Rejected
+        with patch.object(self.m,'BusLoginDialog',return_value=login):
+            dialog._api_ready({'ready':{}})
+        w.ensure_bus_session_async.assert_not_called()
+        self.assertFalse(dialog.active)
+        self.assertIn('취소',dialog.message.text())
+
+    def test_login_dialog_has_only_credential_inputs_and_masks_password(self):
+        login = self.m.BusLoginDialog('saved-user',self.window)
+        self.assertEqual(login.username.text(),'saved-user')
+        self.assertEqual(login.password.echoMode(),self.m.QLineEdit.Password)
+        self.assertEqual(login.password.text(),'')
+        self.assertFalse(login.login_button.isEnabled())
+        login.password.setText('secret ')
+        self.assertTrue(login.login_button.isEnabled())
+        self.assertEqual(login.values(),('saved-user','secret '))
+        self.assertEqual(len(login.findChildren(self.m.QLineEdit)),2)
+        self.assertEqual(len(login.findChildren(self.m.QCheckBox)),1)
+        self.assertFalse(login.remember.isChecked())
+        self.assertFalse(login.findChildren(self.m.QSpinBox))
+        login.close()
+
+    def test_failed_bus_login_prompts_for_credentials_on_retry(self):
+        w = self.window; w.creds = {'id':'wrong-user','pw':'wrong-password'}
+        dialog = self.make_dialog(); dialog.active = True; dialog.stage = 1
+        dialog._bus_ready(False)
+        dialog.active = True; dialog.stage = 0; w.ensure_bus_session_async = Mock()
+        login = Mock(); login.exec_.return_value = self.m.QDialog.Accepted
+        login.values.return_value = ('correct-user','correct-password')
+        login.remember.isChecked.return_value = False
+        with patch.object(self.m,'BusLoginDialog',return_value=login) as factory:
+            dialog._api_ready({'ready':{}})
+        factory.assert_called_once()
+        self.assertEqual(w.creds['id'],'correct-user')
+        w.ensure_bus_session_async.assert_called_once()
+
+    def test_startup_login_save_choice_is_applied_after_success_and_preserves_other_settings(self):
+        import json
+        w = self.window; w.creds = {'id':'','pw':''}
+        with open(self.m.CONF_FILE,'w',encoding='utf-8') as handle:
+            json.dump({'theme':'dark','debug':True,'remove_fail_tol':9},handle)
+        dialog = self.make_dialog(); dialog.active = True; dialog.stage = 0
+        callbacks = []; w.ensure_bus_session_async = lambda purpose,callback:callbacks.append(callback)
+        w._request_and_import = Mock()
+        login = Mock(); login.exec_.return_value = self.m.QDialog.Accepted
+        login.values.return_value = ('operator','saved-secret'); login.remember.isChecked.return_value = True
+        with patch.object(self.m,'BusLoginDialog',return_value=login):
+            dialog._api_ready({'ready':{}})
+        with open(self.m.CONF_FILE,encoding='utf-8') as handle:
+            self.assertNotIn('pw',json.load(handle))
+        callbacks[0](True)
+        with open(self.m.CONF_FILE,encoding='utf-8') as handle: saved = json.load(handle)
+        self.assertEqual(saved['pw'],'saved-secret')
+        self.assertEqual(saved['id'],'operator')
+        self.assertEqual(saved['theme'],'dark'); self.assertTrue(saved['debug'])
+        self.assertEqual(saved['remove_fail_tol'],9)
+        self.assertNotIn('saved-secret',w.log.toPlainText())
+
+    def test_startup_login_without_save_removes_old_saved_credentials_after_success(self):
+        import json
+        w = self.window; w.creds = {'id':'old','pw':'old-password'}
+        with open(self.m.CONF_FILE,'w',encoding='utf-8') as handle:
+            json.dump({'id':'old','pw':'old-password','theme':'dark'},handle)
+        dialog = self.make_dialog(); dialog._login_failed = True; dialog.active = True; dialog.stage = 0
+        w.ensure_bus_session_async = lambda purpose,callback:callback(True)
+        w._request_and_import = Mock()
+        login = Mock(); login.exec_.return_value = self.m.QDialog.Accepted
+        login.values.return_value = ('new-user','session-password'); login.remember.isChecked.return_value = False
+        with patch.object(self.m,'BusLoginDialog',return_value=login): dialog._api_ready({'ready':{}})
+        with open(self.m.CONF_FILE,encoding='utf-8') as handle: saved = json.load(handle)
+        self.assertNotIn('id',saved); self.assertNotIn('pw',saved)
+        self.assertEqual(saved['theme'],'dark')
+        self.assertEqual(w.creds['pw'],'session-password')
+
+    def test_failed_login_does_not_persist_checked_save_choice(self):
+        from pathlib import Path
+        w = self.window; w.creds = {'id':'','pw':''}
+        dialog = self.make_dialog(); dialog.active = True; dialog.stage = 0
+        w.ensure_bus_session_async = lambda purpose,callback:callback(False)
+        login = Mock(); login.exec_.return_value = self.m.QDialog.Accepted
+        login.values.return_value = ('bad-user','bad-password'); login.remember.isChecked.return_value = True
+        with patch.object(self.m,'BusLoginDialog',return_value=login): dialog._api_ready({'ready':{}})
+        self.assertFalse(Path(self.m.CONF_FILE).exists())
+        self.assertNotIn('bad-password',w.log.toPlainText())
