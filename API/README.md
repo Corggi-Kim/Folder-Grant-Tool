@@ -1,10 +1,12 @@
 # Folder Grant API
 
-기존 `Folder Grant Tool_v3.3.5.pyw`를 변경하지 않고, BUS와 과도기 테스트 클라이언트가 공통으로 사용할 서버 API를 개발하는 독립 프로젝트입니다.
+권한 부여·해제와 신규 프로젝트 생성을 처리하는 독립 API 서버입니다. 현재 패키지 버전은 **0.4.0**입니다. BUS 조회·완료는 [정식 Client](../Client/README.md)가 담당하고, API는 AD·폴더 권한 실행과 작업 이력을 관리합니다. 기존 `Folder Grant Tool_v3.3.5.pyw`는 수정하지 않습니다.
 
-현재 개발 단계는 Preview/Job API와 선택 가능한 Mock 또는 PowerShell 실행기를 제공합니다. 입력값을 검증한 뒤 대상 AD 그룹, 폴더 경로와 실행 계획을 만들고 SQLite에 작업 이력을 저장합니다.
+현재 베타 구현은 Preview/Job API와 선택 가능한 Mock 또는 PowerShell 실행기를 제공합니다. 입력값을 검증한 뒤 대상 AD 그룹, 폴더 경로와 실행 계획을 만들고 SQLite에 작업 이력을 저장합니다.
 
 > **주의:** 기본값은 `mock`이며 외부 시스템을 변경하지 않습니다. `powershell` 모드는 실제 AD 및 폴더 ACL을 변경하므로 테스트 계정·그룹·폴더에서만 사용하십시오.
+
+[API 설계·운영·유지보수 Word](../docs/API_설계_운영_유지보수_Beta.docx) · [베타 문서 목록](../docs/README.md)
 
 ## 개발 환경 실행
 
@@ -18,7 +20,7 @@ uvicorn folder_grant_api.main:app --reload
 
 Swagger UI: <http://127.0.0.1:8000/docs>
 
-Swagger의 **Authorize** 버튼에 `.env`의 `FGT_API_KEY` 값을 입력해야 보호된 API를 호출할 수 있습니다. `/health`만 인증 없이 접근할 수 있습니다.
+Swagger의 **Authorize** 버튼에 `.env`의 `FGT_API_KEY` 값을 입력해야 보호된 API를 호출할 수 있습니다. 상태·업무 엔드포인트 중 `/health`만 인증 없이 접근할 수 있습니다. `/docs`와 OpenAPI 문서는 별도로 접근 제한되어 있지 않습니다. `/ready`는 인증과 DB 연결을 검사하지만 AD·공유 폴더 접근까지 확인하지는 않습니다. Preview도 실행 계획만 만들며 실제 자원의 존재·권한은 검사하지 않습니다.
 
 ## 테스트
 
@@ -33,10 +35,11 @@ pytest
 | `GET` | `/health` | 프로세스 상태 확인 |
 | `GET` | `/ready` | SQLite 연결을 포함한 준비 상태 확인 |
 | `POST` | `/api/v1/access-jobs/preview` | 실제 변경 없이 권한 작업 계획 생성 |
-| `POST` | `/api/v1/access-jobs` | Mock Job 등록, `request_id` 중복 방지 |
+| `POST` | `/api/v1/access-jobs` | 설정된 Mock/PowerShell 모드로 Job 등록, `request_id` 중복 방지 |
 | `GET` | `/api/v1/access-jobs/{job_id}` | 작업과 단계별 상태 조회 |
 | `GET` | `/api/v1/access-jobs/by-request/{request_id}` | 요청번호로 작업 조회 |
 | `POST` | `/api/v1/access-jobs/{job_id}/cancel` | 대기/실행 중 작업 취소 요청 |
+| `POST` | `/api/v1/access-jobs/{job_id}/retry` | 실제 실패·부분 성공 권한 Job의 미완료 단계 재실행 |
 | `POST` | `/api/v1/project-jobs/preview` | 신규 프로젝트 그룹·폴더 생성 계획 확인 |
 | `POST` | `/api/v1/project-jobs` | 신규 프로젝트 생성 Job 등록 |
 | `GET` | `/api/v1/project-jobs/{job_id}` | 신규 프로젝트 Job 상태 조회 |
@@ -77,6 +80,8 @@ FGT_HOST=0.0.0.0
 FGT_PORT=8000
 ```
 
+위 수신 설정은 Windows 서비스 래퍼가 사용합니다. 외부 PC에서 수동 Uvicorn으로 접속을 받으려면 `python -m uvicorn folder_grant_api.main:app --host 0.0.0.0 --port 8000`처럼 CLI 인자도 지정해야 합니다.
+
 Mock 검증 후 테스트 자원에 실제 작업을 적용할 때만 서버를 중지하고 다음으로 변경합니다.
 
 ```dotenv
@@ -105,7 +110,7 @@ Restart-Service FolderGrantApi
 
 수동 Uvicorn 실행이면 서버를 종료하고 다시 실행합니다. `POWERSHELL_TIMEOUT`은 단순한 클라이언트 조회 실패가 아니라 서버가 실행 제한에 도달하여 PowerShell 프로세스를 종료한 결과입니다. 일부 권한이 적용됐을 수 있으며 이후 단계는 실행되지 않습니다. 실행 제한을 늘려도 기존의 실패·부분 성공 Job은 자동으로 재개되거나 성공으로 바뀌지 않습니다.
 
-같은 `request_id`를 다시 등록하면 기존 Job을 반환하므로 재실행되지 않습니다. 해당 Job의 단계 결과와 실제 권한을 확인한 후, 재실행이 필요하면 별도의 새 `request_id`로 요청해야 합니다. 클라이언트의 **완료 처리**는 최신 상태를 조회할 뿐 권한 작업을 재등록하거나 실패를 성공으로 변경하지 않습니다.
+같은 `request_id`를 다시 등록하면 기존 또는 최신 재실행 Job을 반환하므로 권한을 다시 실행하지 않습니다. 원인과 실제 권한을 확인한 뒤 **실패한 권한 작업 재실행** 절차의 `/retry`를 사용하세요. 정식 Client에서는 실패·부분 성공 항목을 선택하고 **선택 실행**의 재실행 안내를 확인합니다. 임의 새 요청번호로 중복 접수하지 마세요. **BUS 완료 재확인**은 서버 결과를 조회하고 BUS 완료만 처리하며 권한 작업을 재등록하지 않습니다.
 
 ## Windows 서비스 등록
 
@@ -163,14 +168,13 @@ Get-Content .\logs\service.log -Tail 100
 
 ## 현재 실행 방식의 제한
 
-현재 Worker는 FastAPI 프로세스의 Background Task로 실행됩니다. 서버 프로세스가 종료되면 실행 중인 작업을 자동 복구하지 않으므로 테스트용으로만 사용해야 합니다. 또한 취소 요청은 작업 단계 사이에서 확인하며, 이미 실행 중인 단일 PowerShell 프로세스를 즉시 종료하지는 않습니다. 운영 전에는 별도 Worker 프로세스와 재시작 복구 기능을 추가해야 합니다.
+현재 Worker는 FastAPI 프로세스의 Background Task로 실행됩니다. 서버 프로세스가 종료되면 실행 중인 작업을 자동 복구하지 않으므로 제한된 시험 자원에서 베타 검증용으로 사용해야 합니다. 또한 취소 요청은 작업 단계 사이에서 확인하며, 이미 실행 중인 단일 PowerShell 프로세스를 즉시 종료하지는 않습니다. 운영 전에는 별도 Worker 프로세스와 재시작 복구 기능을 추가해야 합니다.
 
-## 다음 단계
+## 베타 운영 범위와 후속 개선
 
-1. 신규 프로젝트 생성 API를 테스트 그룹·경로에서 검증
-2. 별도 Worker 프로세스와 서버 재시작 복구
-3. 기존 BUS Selenium 기능을 유지한 단일 파일 클라이언트
-4. BUS 연동 계약 확정
+정식 BUS Client와 신규 프로젝트 생성 API는 구현되어 있습니다. 제한된 시험 자원에서 먼저 검증하며, 서버 재시작 전 진행 Job과 잔존 PowerShell을 확인해야 합니다. 서비스 자동 재시작은 Job 자동 복구를 의미하지 않습니다.
+
+별도 Worker·재시작 복구, 사용자별 인증·권한, 프로젝트 단위 동시성 제어, 로그 보관·모니터링과 DB 마이그레이션은 후속 개선 항목입니다. 현재 공유 API Key 인증에는 사용자별 권한 분리가 없고 `requested_by`는 요청자가 입력한 값입니다. 기본 HTTP의 전송 보호와 방화벽 접근 범위는 배포 환경에서 별도로 구성해야 합니다.
 
 ## 신규 프로젝트 생성
 
@@ -187,14 +191,14 @@ Get-Content .\logs\service.log -Tail 100
 
 ## 수동 테스트 클라이언트
 
-여러 Level2, Level3, Role 조합을 반복 시험할 수 있는 PyQt 클라이언트가 `test_client/`에 있습니다.
+여러 Level2, Level3, Role 조합을 수동 시험하는 개발 도구가 `test_client/`에 있습니다. BUS 사용자는 [정식 Client](../Client/README.md)를 사용하세요.
 
 ```powershell
 python -m pip install -e ".[client]"
 python -m test_client.main
 ```
 
-현재 버전은 수동 요청 추가, Preview, 다중 Job 등록, 상태 자동 조회, 취소 및 결과 로그를 제공합니다. Selenium BUS 조회 연결은 후속 단계입니다.
+이 개발 도구는 수동 요청 추가, Preview, 다중 Job 등록, 상태 자동 조회, 취소 및 결과 로그를 제공합니다. BUS 연동은 이 도구에 없으며 별도 `Client/`에서 제공합니다.
 
 
 ### 실패한 권한 작업 재실행
