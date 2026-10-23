@@ -917,6 +917,8 @@ class BusSessionManager(QObject):
         self.driver = None
         self._ready = False
         self._busy = False
+        self._initializing = False
+        self._authenticated_credentials = None
         self._cancel = False
         self.debug_enabled = False
         self.debug_dir = DEBUG_DIR
@@ -945,7 +947,8 @@ class BusSessionManager(QObject):
         self._user, self._pw = (user or "").strip(), (pw or "").strip()
 
     def is_ready(self) -> bool:
-        return self._ready and self.driver is not None
+        return (self._ready and self.driver is not None
+                and self._authenticated_credentials == (self._user,self._pw))
 
     def is_busy(self) -> bool:
         return self._busy
@@ -1298,6 +1301,18 @@ class BusSessionManager(QObject):
 
     @pyqtSlot()
     def start(self):
+        if self._initializing or getattr(self,'_stopping',False):
+            return
+        self._initializing = True
+        self._busy = True; self.busyChanged.emit(True)
+        self._cancel = False
+        try:
+            self._start_session()
+        finally:
+            self._initializing = False
+            self._busy = False; self.busyChanged.emit(False)
+
+    def _start_session(self):
         def _cleanup_driver(drv):
             if not drv:
                 return
@@ -1315,10 +1330,14 @@ class BusSessionManager(QObject):
             self.readyChanged.emit(False, "자격증명 없음")
             return
 
+        username,password = self._user,self._pw
         if self.driver:
-            self._ready = True
-            self.readyChanged.emit(True, "이미 준비됨")
-            return
+            if self.is_ready():
+                self.readyChanged.emit(True,'이미 준비됨')
+                return
+            _cleanup_driver(self.driver)
+            self.driver = None; self._ready = False
+            self._authenticated_credentials = None
 
         attempt = 0
         last_err = None
@@ -1333,8 +1352,8 @@ class BusSessionManager(QObject):
 
                 d.get(BUS_LOGIN_URL)
                 WebDriverWait(d, 20).until(EC.presence_of_element_located((By.ID, "windowsaccount")))
-                d.find_element(By.ID, "windowsaccount").send_keys(self._user)
-                d.find_element(By.ID, "password").send_keys(self._pw)
+                d.find_element(By.ID, "windowsaccount").send_keys(username)
+                d.find_element(By.ID, "password").send_keys(password)
                 d.find_element(By.ID, "btnLogin").click()
                 WebDriverWait(d, 20).until(EC.url_contains("Common"))
 
@@ -1352,6 +1371,12 @@ class BusSessionManager(QObject):
 
                 self._set_request_filter(REQ_GRANT)
 
+                if (username,password)!=(self._user,self._pw):
+                    _cleanup_driver(self.driver); self.driver = None; self._ready = False
+                    self._authenticated_credentials = None
+                    self.readyChanged.emit(False,'로그인 중 계정이 변경되었습니다. 다시 로그인하세요.')
+                    return
+                self._authenticated_credentials = (username,password)
                 self._ready = True
                 self.readyChanged.emit(True, f"준비됨(시도 {attempt}/{self.MAX_INIT_RETRY})")
                 return
@@ -1361,7 +1386,8 @@ class BusSessionManager(QObject):
                 _cleanup_driver(self.driver)
                 self.driver = None
                 self._ready = False
-                self.readyChanged.emit(False, f"세션 초기화 실패({attempt}/{self.MAX_INIT_RETRY}): {e}")
+                # Intermediate retries must not release login callbacks or enable another login.
+                self._authenticated_credentials = None
 
                 if attempt >= self.MAX_INIT_RETRY or self._cancel:
                     break
@@ -2398,6 +2424,59 @@ class BusySpinner(QWidget):
         painter.drawArc(5,5,20,20,-self.angle*16,105*16)
 
 
+class BusLoginDialog(QDialog):
+    """Startup-only credentials prompt with an explicit remember choice."""
+    def __init__(self,username='',parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('BUS 로그인')
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.setMinimumWidth(360)
+        self.setStyleSheet("""
+            QDialog {background:#ffffff;}
+            QLabel {background:transparent;color:#263245;font-size:13px;}
+            QLabel#loginTitle {font-size:18px;font-weight:600;}
+            QLineEdit {background:#ffffff;color:#263245;border:1px solid #cbd6ea;border-radius:5px;padding:7px;font-size:13px;}
+            QLineEdit:focus {border-color:#2864ed;}
+            QCheckBox {background:transparent;color:#263245;font-size:13px;}
+            QCheckBox::indicator {background:#ffffff;border:1px solid #b9c6d8;border-radius:3px;width:15px;height:15px;}
+            QCheckBox::indicator:checked {background:#2864ed;border-color:#2864ed;}
+            QPushButton {background:#ffffff;color:#263245;border:1px solid #cbd6ea;border-radius:5px;padding:7px 16px;}
+            QPushButton#loginButton {background:#2864ed;color:#ffffff;border-color:#2864ed;}
+            QPushButton#loginButton:disabled {background:#edf1f7;color:#9da8b8;border-color:#dce3ec;}
+        """)
+        layout = QVBoxLayout(self); layout.setContentsMargins(24,22,24,20); layout.setSpacing(16)
+        title = QLabel('BUS 로그인'); title.setObjectName('loginTitle'); layout.addWidget(title)
+        form = QFormLayout(); form.setHorizontalSpacing(12); form.setVerticalSpacing(12)
+        self.username = QLineEdit(username); self.username.setPlaceholderText('아이디')
+        self.password = QLineEdit(); self.password.setPlaceholderText('비밀번호')
+        self.password.setEchoMode(QLineEdit.Password)
+        form.addRow('아이디',self.username); form.addRow('비밀번호',self.password)
+        layout.addLayout(form)
+        self.remember = QCheckBox('계정 정보 저장'); self.remember.setChecked(False)
+        layout.addWidget(self.remember)
+        buttons = QDialogButtonBox(self)
+        self.login_button = buttons.addButton('로그인',QDialogButtonBox.AcceptRole)
+        self.login_button.setObjectName('loginButton'); self.login_button.setDefault(True)
+        buttons.addButton('취소',QDialogButtonBox.RejectRole)
+        buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
+        self.username.textChanged.connect(self._validate)
+        self.password.textChanged.connect(self._validate)
+        layout.addWidget(buttons)
+        self._validate()
+        (self.password if username else self.username).setFocus()
+
+    def values(self):
+        return self.username.text().strip(), self.password.text()
+
+    def _validate(self):
+        username,password = self.values()
+        self.login_button.setEnabled(bool(username and password))
+
+    def accept(self):
+        if all(self.values()):
+            super().accept()
+
+
 class StartupLoadingDialog(QDialog):
     """Asynchronous startup coordinator. No permission jobs are submitted here."""
     def __init__(self,host):
@@ -2405,6 +2484,7 @@ class StartupLoadingDialog(QDialog):
         self.host = host
         host._startup_dialog = self
         self.stage = -1; self.active = False; self.api_thread = None; self.api_task = None
+        self._login_failed = False
         self.setWindowTitle('Folder Grant 시작'); self.setFixedSize(420,360)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.setStyleSheet('QWidget{background:transparent;} QDialog{background:#fff;} QLabel{color:#263245;background:transparent;font-size:13px;} QLabel#startupTitle{font-size:18px;font-weight:700;} QPushButton{background:#fff;color:#2864ed;border:1px solid #cbd6ea;border-radius:5px;padding:7px 12px;} QPushButton:hover{background:#eef4ff;} QPushButton:disabled{color:#98a2b3;}')
@@ -2474,10 +2554,15 @@ class StartupLoadingDialog(QDialog):
             return
         self.host._set_api_connection_state(True,result.get('ready') or {})
         self._stage(1)
-        if not self.host.creds.get('id') or not self.host.creds.get('pw'):
-            self.deadline.stop(); self.host._open_settings(); self.deadline.start()
-            if not self.host.creds.get('id') or not self.host.creds.get('pw'):
-                self.fail('BUS 계정 설정이 필요합니다.'); return
+        if not self.host.creds.get('id') or not self.host.creds.get('pw') or self._login_failed:
+            self.deadline.stop()
+            login = BusLoginDialog(self.host.creds.get('id',''),self)
+            if login.exec_()!=QDialog.Accepted:
+                self.fail('BUS 로그인을 취소했습니다. 다시 시도하거나 메인 화면을 여세요.'); return
+            username,password = login.values()
+            self.host._apply_login_credentials(username,password,login.remember.isChecked())
+            self._login_failed = False
+            self.deadline.start()
         self.host.ensure_bus_session_async('시작 준비',self._bus_ready)
 
     def _api_failed(self,message):
@@ -2491,10 +2576,13 @@ class StartupLoadingDialog(QDialog):
         self.api_thread = None; self.api_task = None; self._update_retry()
 
     def _bus_ready(self,ok):
+        if self.stage==1:
+            self._login_failed = not ok
         self._update_retry()
         if not self.active or self.stage!=1:
             return
         if not ok:
+            self._login_failed = True
             self.fail('BUS 로그인에 실패했습니다. 계정과 연결 상태를 확인하세요.'); return
         self._stage(2)
         self._load_access_when_idle()
@@ -4987,6 +5075,8 @@ class AccessManager(QMainWindow):
             pass
         self.remove_fail_tolerance = int(self.creds.get("remove_fail_tol", 5))
 
+        self._remember_credentials = bool(self.creds.get('id') and self.creds.get('pw'))
+
     def _save_creds(self, id_, pw_, debug_):
         with open(CONF_FILE, "w", encoding="utf-8") as f:
             json.dump({"id": id_, "pw": pw_, "debug": bool(debug_), "theme": getattr(self, "current_theme", "light")},
@@ -5033,7 +5123,7 @@ class AccessManager(QMainWindow):
 
     def _open_settings(self):
         current_debug = bool(self.creds.get("debug", False))
-        remembered = bool(self.creds.get("id"))
+        remembered = getattr(self,"_remember_credentials",False)
         current_tol = int(self.creds.get("remove_fail_tol", 5))
 
         dlg = SettingsDialog(self, self.creds, remembered=remembered, debug_on=current_debug, fail_tol_default=current_tol)
@@ -5043,8 +5133,8 @@ class AccessManager(QMainWindow):
             tol = dlg.get_fail_tol()
 
             self.creds = {
-                "id": uid if do_save else "",
-                "pw": pw if do_save else "",
+                "id": uid,
+                "pw": pw,
                 "debug": bool(debug_on),
                 "remove_fail_tol": int(tol),
                 "notify_refresh_min": int(notify_mins),
@@ -5062,20 +5152,33 @@ class AccessManager(QMainWindow):
                 "remove_fail_tol": int(tol),
                 "notify_refresh_min": int(notify_mins),
             }
-            if do_save:
-                data.update({"id": uid, "pw": pw})
-
-            try:
-                with open(CONF_FILE, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
+            self._apply_login_credentials(uid,pw,do_save,data)
 
             # self._notify_refresh_mins = int(notify_mins)
             # self.notify_timer.setInterval(max(5, self._notify_refresh_mins) * 60 * 1000)
             self.debug_enabled = bool(debug_on)
             self.session.set_debug(self.debug_enabled, DEBUG_DIR)
             self.remove_fail_tolerance = int(tol)
+
+    def _apply_login_credentials(self,uid,pw,remember,settings_data=None):
+        """Shared credential handling for settings and the compact startup prompt."""
+        self.creds.update(id=uid,pw=pw)
+        try:
+            data = settings_data
+            if data is None:
+                data = {}
+                if os.path.exists(CONF_FILE):
+                    with open(CONF_FILE,encoding='utf-8') as handle:
+                        data = json.load(handle)
+            if remember:
+                data.update(id=uid,pw=pw)
+            else:
+                data.pop('id',None); data.pop('pw',None)
+            with open(CONF_FILE,'w',encoding='utf-8') as handle:
+                json.dump(data,handle,ensure_ascii=False,indent=2)
+            self._remember_credentials = bool(remember)
+        except Exception:
+            self._log('BUS 계정 저장 설정을 기록하지 못했습니다.')
 
     def _request_and_import(self):
         if self.api_thread is not None or self.session.is_busy():

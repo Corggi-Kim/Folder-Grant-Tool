@@ -77,6 +77,12 @@ def render():
                 for _ in range(4):app.processEvents()
                 w.grab().save(str(output/f'client-busy-{mode}-v1.1.0.png'))
             w._set_running_ui(False)
+        if '--login' in __import__('sys').argv:
+            login = m.BusLoginDialog('',w)
+            login.show()
+            for _ in range(4):app.processEvents()
+            login.grab().save(str(output/'client-startup-login-v1.1.0.png'))
+            login.hide()
         if '--startup' in __import__('sys').argv:
             from PyQt5.QtTest import QTest
             w.hide()
