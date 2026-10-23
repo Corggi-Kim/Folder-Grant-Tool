@@ -17,7 +17,7 @@ def render():
     try:
         w,m,app = fixture.window,fixture.m,fixture.app
         w.api_config['base_url'] = 'http://192.168.1.10:8000'
-        w._on_counts_ready({'신규미완료':2,'진행-부여':3,'진행-제거':1,'종료-부여':1,'종료-제거':1})
+        # Notification/count badges are disabled in this client.
         w.session.is_ready = lambda:True
         w._set_api_connection_state(True,dict(executor_mode='powershell'))
         started = (datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(seconds=522)).isoformat()

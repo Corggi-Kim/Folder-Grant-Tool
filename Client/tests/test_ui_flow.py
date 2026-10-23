@@ -27,7 +27,7 @@ class UiFlowTests(unittest.TestCase):
             json.dump(dict(base_url='http://localhost:8000', api_key='test'), f)
         for key, value in [('API_CONFIG_FILE',config),('CONF_FILE',os.path.join(self.tmp.name,'login.json'))]:
             p = patch.object(self.m,key,value); p.start(); self.patches.append(p)
-        for name in ('refresh_notifications','_show_initial_api_settings'):
+        for name in ('_show_initial_api_settings',):
             p = patch.object(self.m.AccessManager,name); p.start(); self.patches.append(p)
         for name in ('information','warning','critical'):
             p = patch.object(self.m.QMessageBox,name); p.start(); self.patches.append(p)
@@ -148,11 +148,10 @@ class UiFlowTests(unittest.TestCase):
     def tearDown(self):
         self.window.close()
         deadline = time.monotonic()+3
-        while (self.window.session_thread.isRunning() or self.window.watch_thread.isRunning()) and time.monotonic()<deadline:
+        while self.window.session_thread.isRunning() and time.monotonic()<deadline:
             self.app.processEvents()
             time.sleep(0.01)
         self.assertFalse(self.window.session_thread.isRunning())
-        self.assertFalse(self.window.watch_thread.isRunning())
         for p in reversed(self.patches): p.stop()
         self.tmp.cleanup()
 
