@@ -15,6 +15,34 @@ class TableControlTests(unittest.TestCase):
         v.set_data(['프로젝트코드','프로젝트명'],[['26012','First'],['26013','Second'],['26014','Third']])
         return v
 
+    def test_help_labels_are_consistent(self):
+        dialog=self.m.HelpDialog(self.window)
+        self.assertEqual(dialog.windowTitle(),'도움말')
+        self.assertIn('Folder Grant 도움말',[label.text() for label in dialog.findChildren(self.m.QLabel)])
+        actions=[a.text() for a in self.window.settings_button.menu().actions()]
+        self.assertIn('도움말',actions)
+        self.assertNotIn('사용 안내',actions)
+        dialog.close()
+
+    def test_project_selection_count_tracks_checks_add_delete_and_reload(self):
+        v=self.viewer()
+        self.assertEqual(v.selection_label.text(),'선택 3건')
+        v.tbl.cellWidget(1,0).findChild(self.m.QCheckBox).setChecked(False)
+        self.assertEqual(v.selection_label.text(),'선택 2건')
+        v._delete_checked_rows()
+        self.assertEqual(v.selection_label.text(),'선택 0건')
+        v._manual_add('26015','Added')
+        self.assertEqual(v.selection_label.text(),'선택 1건')
+        v._toggle_all_rows(True)
+        self.assertEqual(v.selection_label.text(),'선택 2건')
+        v._toggle_all_rows(False)
+        self.assertEqual(v.selection_label.text(),'선택 0건')
+        v.set_data(['프로젝트코드','프로젝트명'],[['26016','Reloaded']])
+        self.assertEqual(v.selection_label.text(),'선택 1건')
+        v._delete_all_rows()
+        self.assertEqual(v.selection_label.text(),'선택 0건')
+        self.assertFalse(v.tbl.horizontalHeader()._cb.isChecked())
+
     def test_project_delete_checked_preserves_remaining_request_identity(self):
         v = self.viewer()
         col = v._hidx['프로젝트코드']

@@ -115,13 +115,13 @@ class HelpDialog(QDialog):
     """User-facing task guide, using the same palette as the main window."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("사용 안내")
+        self.setWindowTitle("도움말")
         self.resize(800, 660)
         t = THEMES[getattr(parent, 'current_theme', 'light')]
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 18)
         layout.setSpacing(14)
-        title = QLabel("Folder Grant 사용 안내", self)
+        title = QLabel("Folder Grant 도움말", self)
         title.setStyleSheet("font-size:22px;font-weight:700;background:transparent;")
         layout.addWidget(title)
         subtitle = QLabel("요청 조회부터 완료 처리까지, 프로그램의 주요 기능과 사용 방법을 안내합니다.", self)
@@ -3118,10 +3118,20 @@ class NewItemsViewer(QDialog):
         self.chk_auto_complete.setChecked(True)
         self.btn_stop = QPushButton('중지')
         self.btn_stop.clicked.connect(lambda: self.worker.stop() if self.worker else None)
+        self.selection_label = QLabel('선택 0건'); self.selection_label.setObjectName('selectionLabel')
+        btns.addWidget(self.selection_label)
         btns.addWidget(self.chk_auto_complete); btns.addStretch()
         btns.addWidget(self.btn_preview); btns.addWidget(self.btn_create); btns.addWidget(self.btn_stop)
         self.btn_stop.setObjectName('dangerButton')
         self.btn_stop.setEnabled(False)
+        self.tbl.model().rowsRemoved.connect(self._refresh_selection)
+        self.tbl.model().modelReset.connect(self._refresh_selection)
+        self._refresh_selection()
+
+    def _refresh_selection(self, *args):
+        selected = sum(self._is_row_checked(row) for row in range(self.tbl.rowCount()))
+        self.selection_label.setText(f'선택 {selected}건')
+        self.tbl.horizontalHeader().setChecked(bool(self.tbl.rowCount()) and selected == self.tbl.rowCount())
 
     def _can_delete_rows(self):
         return (self.tbl.contextMenuPolicy() == Qt.CustomContextMenu
@@ -3203,6 +3213,7 @@ class NewItemsViewer(QDialog):
         row = self.tbl.rowCount()
         self.tbl.insertRow(row)
         checkbox = QCheckBox(); checkbox.setChecked(True)
+        checkbox.toggled.connect(self._refresh_selection)
         holder = QWidget(); layout = QHBoxLayout(holder)
         layout.addWidget(checkbox); layout.setContentsMargins(0,0,0,0)
         self.tbl.setCellWidget(row,0,holder)
@@ -3219,6 +3230,7 @@ class NewItemsViewer(QDialog):
         self.tbl.setItem(row,self._status_col,QTableWidgetItem('실행 대기'))
         self.tbl.setCurrentCell(row,self._hidx['프로젝트코드'])
         self._refresh_project_detail()
+        self._refresh_selection()
         self.status_lbl.setText('수동 요청을 추가했습니다. 미리보기 또는 선택실행을 누르세요.')
 
 
@@ -3281,6 +3293,7 @@ class NewItemsViewer(QDialog):
             for r, row in enumerate(rows):
                 cb = QCheckBox(self.tbl)
                 cb.setChecked(True)
+                cb.toggled.connect(self._refresh_selection)
                 wrap = QWidget(self.tbl)
                 box = QHBoxLayout(wrap); box.setContentsMargins(0,0,0,0)
                 box.addWidget(cb, 0, Qt.AlignCenter)
@@ -3315,6 +3328,7 @@ class NewItemsViewer(QDialog):
                     request_id = new_client_request_id()
                 item.setData(Qt.UserRole,dict(source='bus',request_id=request_id,bus_done=False))
         self._configure_project_summary()
+        self._refresh_selection()
 
     def _configure_project_summary(self):
         self._status_col = self.tbl.columnCount()
@@ -4392,7 +4406,7 @@ class AccessManager(QMainWindow):
         self.columns_action = menu.addAction('상세 열 표시 (이름 · 부서 · Role)')
         self.columns_action.setCheckable(True)
         self.columns_action.toggled.connect(self._toggle_detail_columns)
-        menu.addAction('사용 안내',self._show_help)
+        menu.addAction('도움말',self._show_help)
         # menu.addAction('BUS 요청 알림',self._open_notif_popup)
         self.settings_button.setMenu(menu)
         self.header_bar.addWidget(self.settings_button)
