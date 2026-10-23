@@ -1,6 +1,6 @@
 # API Test Client
 
-BUS 정식 연동 전 수동 요청으로 Folder Grant API의 다양한 프로젝트, Level2, Level3, Role 조합을 시험하는 PyQt 클라이언트입니다. 기존 `Folder Grant Tool_v3.3.5.pyw`는 수정하거나 import하지 않습니다.
+수동 요청으로 Folder Grant API의 다양한 프로젝트, Level2, Level3, Role 조합을 시험하는 개발용 PyQt 클라이언트입니다. BUS 조회·완료가 필요한 사용자는 별도 [정식 Client](../../Client/README.md)를 사용하세요. 기존 `Folder Grant Tool_v3.3.5.pyw`는 수정하거나 import하지 않습니다.
 
 ## 설치
 
