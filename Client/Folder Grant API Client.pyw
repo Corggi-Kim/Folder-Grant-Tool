@@ -124,7 +124,7 @@ class HelpDialog(QDialog):
         title = QLabel("Folder Grant 사용 안내", self)
         title.setStyleSheet("font-size:22px;font-weight:700;background:transparent;")
         layout.addWidget(title)
-        subtitle = QLabel("요청 확인부터 완료 처리까지, 필요한 안내를 골라 보세요.", self)
+        subtitle = QLabel("요청 조회부터 완료 처리까지, 프로그램의 주요 기능과 사용 방법을 안내합니다.", self)
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet(f"color:{t['muted']};background:transparent;")
         layout.addWidget(subtitle)
