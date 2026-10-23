@@ -230,28 +230,17 @@ class DesignTests(unittest.TestCase):
         v._manual_add('26-019','수동 연구')
         self.assertEqual(v.detail_values['프로젝트코드'].text(),'26-019')
 
-    def test_request_count_badge_is_scoped_and_settings_detail_is_preserved(self):
+    def test_notification_and_badge_entry_points_are_disabled(self):
         w = self.window
-        w._on_counts_ready({'신규미완료':7,'진행-부여':2,'진행-제거':3,'종료-부여':4,'종료-제거':1})
-        self.assertEqual(w.tab_count_badges[0].text(),'10')
-        self.assertFalse(hasattr(w,'badge_notif'))
-        self.assertIn('BUS 요청 알림',[action.text() for action in w.settings_button.menu().actions()])
-        w.ensure_bus_session_async = lambda purpose,callback:None
-        w.tabs.setCurrentIndex(1)
-        self.assertEqual(w.tab_count_badges[1].text(),'7')
-        w._on_counts_ready({'신규미완료':9})
-        self.assertEqual(w.tab_count_badges[1].text(),'9')
-        w.tabs.setCurrentIndex(0)
-        self.assertEqual(w.tab_count_badges[0].text(),'0')
-
-    def test_count_badges_are_attached_to_each_tab(self):
-        w = self.window
-        self.show()
-        for index,badge in enumerate(w.tab_count_badges):
-            self.assertIs(badge.parent(),w.tabs)
-            point = badge.mapTo(w.tabs,self.m.QPoint(0,0))
-            self.assertTrue(w.tabs.tabRect(index).contains(point))
-            self.assertLess(point.y(),w.tabs.tabRect(index).center().y())
+        self.assertFalse(hasattr(w,'watch_session'))
+        self.assertFalse(hasattr(w,'watch_thread'))
+        self.assertFalse(hasattr(w,'notify_timer'))
+        self.assertFalse(hasattr(w,'tab_count_badges'))
+        self.assertNotIn('BUS 요청 알림',[a.text() for a in w.settings_button.menu().actions()])
+        w._ensure_project_viewer()
+        self.assertFalse(hasattr(w,'new_request_notice'))
+        self.assertFalse(hasattr(w._newdlg,'new_request_notice'))
+        self.assertTrue(w.session_thread.isRunning())
 
     def test_screen_log_is_summary_and_file_log_keeps_detail(self):
         from pathlib import Path
@@ -320,3 +309,9 @@ class DesignTests(unittest.TestCase):
         result = dict(status='partially_succeeded',error_code='POWERSHELL_FAILED',replayed=True)
         self.assertIn('이전 작업 결과',self.window._api_log_summary(result,'프로젝트 1987'))
         self.assertIn('재실행 안 함',self.window._api_log_summary(result,'프로젝트 1987'))
+
+    def test_notification_settings_control_is_disabled_but_saved_value_is_preserved(self):
+        dialog = self.m.SettingsDialog(self.window,{'notify_refresh_min':15})
+        self.assertFalse(hasattr(dialog,'sb_notify'))
+        self.assertEqual(dialog.result()[-1],15)
+        dialog.close()

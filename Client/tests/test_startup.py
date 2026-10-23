@@ -70,18 +70,13 @@ class StartupTests(unittest.TestCase):
         self.assertIn('API 연결에 실패',dialog.message.text())
         w.ensure_bus_session_async.assert_not_called()
 
-    def test_zero_badges_hidden_and_new_counts_do_not_replace_loaded_rows(self):
+    def test_loading_lists_does_not_activate_notifications(self):
         w = self.window
-        w._on_counts_ready({})
-        self.assertTrue(all(b.isHidden() for b in w.tab_count_badges))
-        row = self.fixture.row(); w._mark_list_loaded('access',1)
-        before = w._row_values(row)
-        w._on_counts_ready({'진행-부여':2})
-        self.assertFalse(w.tab_count_badges[0].isHidden())
-        self.assertFalse(w.new_request_notice.isHidden())
+        row = self.fixture.row(); before = w._row_values(row)
+        w._mark_list_loaded('access',1)
         self.assertEqual(w._row_values(row),before)
-        w._mark_list_loaded('access',2)
-        self.assertTrue(w.new_request_notice.isHidden())
+        self.assertFalse(hasattr(w,'notify_timer'))
+        self.assertFalse(hasattr(w,'tab_count_badges'))
 
     def test_empty_list_and_pending_fetch_have_distinct_messages(self):
         w = self.window; w._ensure_project_viewer()
@@ -153,7 +148,7 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(outcomes[-1],('access',True,''))
         self.assertEqual(w.table.rowCount(),0)
         self.assertEqual(w.table.empty_label.text(),'대기 중인 요청이 없습니다.')
-        self.assertTrue(w.tab_count_badges[0].isHidden())
+        self.assertFalse(hasattr(w,'tab_count_badges'))
 
     def test_access_download_parse_failure_does_not_complete_startup(self):
         w = self.window

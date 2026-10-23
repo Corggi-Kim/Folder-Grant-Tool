@@ -848,11 +848,12 @@ class SettingsDialog(QDialog):
             self.sb_tol.setValue(self._fail_tol_default)
 
         form = QFormLayout()
+        self._saved_notify_refresh_min = (saved or {}).get("notify_refresh_min",10)
 
-        self.sb_notify = QSpinBox()
-        self.sb_notify.setRange(5, 60)
-        self.sb_notify.setValue(int((saved or {}).get("notify_refresh_min", 10)))
-        form.addRow("알림 리프레시(분)", self.sb_notify)
+        # self.sb_notify = QSpinBox()
+        # self.sb_notify.setRange(5, 60)
+        # self.sb_notify.setValue(int((saved or {}).get("notify_refresh_min", 10)))
+        # form.addRow("알림 리프레시(분)", self.sb_notify)
 
         form.addRow("아이디", self.le_id)
         form.addRow("비밀번호", self.le_pw)
@@ -888,7 +889,8 @@ class SettingsDialog(QDialog):
             self.chk_save.isChecked(),
             self.chk_debug.isChecked(),
             int(self.sb_tol.value()),
-            int(self.sb_notify.value()),
+            # int(self.sb_notify.value()),  # 알림 기능 비활성화: 설정값만 보존
+            int(self._saved_notify_refresh_min),
         )
 
     def get_fail_tol(self) -> int:
@@ -2225,62 +2227,63 @@ class BusSessionManager(QObject):
             self.busyChanged.emit(False)
             self.processed.emit([{'row': t.get('row'), 'ok': False, 'msg': f'오류: {e}'} for t in (targets or [])])
 
-class BusWatcher(QObject):
-    stopped = pyqtSignal()
-    readyChanged = pyqtSignal(bool, str)
-    countsReady = pyqtSignal(dict)
+# 알림/배지 기능 비활성화: 복원 가능하도록 기존 구현을 주석으로 보존합니다.
+# class BusWatcher(QObject):
+#     stopped = pyqtSignal()
+#     readyChanged = pyqtSignal(bool, str)
+#     countsReady = pyqtSignal(dict)
 
-    def __init__(self, dl_dir):
-        super().__init__()
-        self._user = ""
-        self._pw = ""
-        self._last_counts = {"신규미완료":0, "진행-부여":0, "진행-제거":0, "종료-부여":0, "종료-제거":0}
-        self._mgr = BusSessionManager(dl_dir)
+#     def __init__(self, dl_dir):
+#         super().__init__()
+#         self._user = ""
+#         self._pw = ""
+#         self._last_counts = {"신규미완료":0, "진행-부여":0, "진행-제거":0, "종료-부여":0, "종료-제거":0}
+#         self._mgr = BusSessionManager(dl_dir)
 
-    def set_creds(self, user, pw):
-        self._user, self._pw = (user or "").strip(), (pw or "").strip()
+#     def set_creds(self, user, pw):
+#         self._user, self._pw = (user or "").strip(), (pw or "").strip()
 
-    def set_debug(self, on, debug_dir):
-        try:
-            self._mgr.set_debug(bool(on), debug_dir)
-        except Exception:
-            pass
+#     def set_debug(self, on, debug_dir):
+#         try:
+#             self._mgr.set_debug(bool(on), debug_dir)
+#         except Exception:
+#             pass
 
-    def is_ready(self):
-        try:
-            return self._mgr.is_ready()
-        except Exception:
-            return False
+#     def is_ready(self):
+#         try:
+#             return self._mgr.is_ready()
+#         except Exception:
+#             return False
 
-    @pyqtSlot()
-    def start(self):
-        if not (self._user and self._pw):
-            self.readyChanged.emit(False, "워처 자격증명 없음")
-            return
-        try:
-            self._mgr.set_creds(self._user, self._pw)
-            self._mgr.start()
-            self.readyChanged.emit(True, "워처 준비됨")
-        except Exception:
-            self.readyChanged.emit(False, "워처 시작 실패")
+#     @pyqtSlot()
+#     def start(self):
+#         if not (self._user and self._pw):
+#             self.readyChanged.emit(False, "워처 자격증명 없음")
+#             return
+#         try:
+#             self._mgr.set_creds(self._user, self._pw)
+#             self._mgr.start()
+#             self.readyChanged.emit(True, "워처 준비됨")
+#         except Exception:
+#             self.readyChanged.emit(False, "워처 시작 실패")
 
-    @pyqtSlot()
-    def stop(self):
-        try:
-            self._mgr.stop()
-        except Exception:
-            pass
-        self.readyChanged.emit(False, "워처 정지됨")
-        self.stopped.emit()
+#     @pyqtSlot()
+#     def stop(self):
+#         try:
+#             self._mgr.stop()
+#         except Exception:
+#             pass
+#         self.readyChanged.emit(False, "워처 정지됨")
+#         self.stopped.emit()
 
-    @pyqtSlot()
-    def collect_counts(self):
-        try:
-            self._mgr.collect_request_counts()
-            self._last_counts = getattr(self._mgr, "_last_counts", self._last_counts)
-            self.countsReady.emit(self._last_counts)
-        except Exception:
-            self.countsReady.emit(self._last_counts)
+#     @pyqtSlot()
+#     def collect_counts(self):
+#         try:
+#             self._mgr.collect_request_counts()
+#             self._last_counts = getattr(self._mgr, "_last_counts", self._last_counts)
+#             self.countsReady.emit(self._last_counts)
+#         except Exception:
+#             self.countsReady.emit(self._last_counts)
 
 class CheckBoxHeader(QHeaderView):
     stateChanged = pyqtSignal(bool)
@@ -2572,42 +2575,43 @@ class RequestTable(QTableWidget):
             self._update_empty()
 
 
-class WorkspaceTabBar(QTabBar):
-    """Keep notification badges attached to the upper right of each label."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.count_badges = []
+# 알림/배지 기능 비활성화: 복원 가능하도록 기존 구현을 주석으로 보존합니다.
+# class WorkspaceTabBar(QTabBar):
+#     """Keep notification badges attached to the upper right of each label."""
+#     def __init__(self, parent=None):
+#         super().__init__(parent)
+#         self.count_badges = []
 
-    def add_count_badges(self):
-        for index in range(self.count()):
-            badge = QLabel('0',self); badge.setObjectName('requestCountBadge')
-            badge.setAlignment(Qt.AlignCenter); badge.setFixedSize(26,18); badge.hide()
-            badge.setAttribute(Qt.WA_TransparentForMouseEvents)
-            self.count_badges.append(badge)
-        self._position_badges()
+#     def add_count_badges(self):
+#         for index in range(self.count()):
+#             badge = QLabel('0',self); badge.setObjectName('requestCountBadge')
+#             badge.setAlignment(Qt.AlignCenter); badge.setFixedSize(26,18); badge.hide()
+#             badge.setAttribute(Qt.WA_TransparentForMouseEvents)
+#             self.count_badges.append(badge)
+#         self._position_badges()
 
-    def tabSizeHint(self,index):
-        size = super().tabSizeHint(index)
-        size.setWidth(size.width()+24)
-        return size
+#     def tabSizeHint(self,index):
+#         size = super().tabSizeHint(index)
+#         size.setWidth(size.width()+24)
+#         return size
 
-    def tabLayoutChange(self):
-        super().tabLayoutChange()
-        self._position_badges()
+#     def tabLayoutChange(self):
+#         super().tabLayoutChange()
+#         self._position_badges()
 
-    def resizeEvent(self,event):
-        super().resizeEvent(event)
-        self._position_badges()
+#     def resizeEvent(self,event):
+#         super().resizeEvent(event)
+#         self._position_badges()
 
-    def _position_badges(self):
-        for index,badge in enumerate(getattr(self,'count_badges',[])):
-            option = QStyleOptionTab(); self.initStyleOption(option,index)
-            rect = self.style().subElementRect(QStyle.SE_TabBarTabText,option,self)
-            width = option.fontMetrics.horizontalAdvance(self.tabText(index))
-            x = rect.center().x()+width//2+4
-            y = rect.center().y()-option.fontMetrics.height()//2-10
-            badge.move(min(x,self.tabRect(index).right()-badge.width()-3),max(3,y))
-            badge.raise_()
+#     def _position_badges(self):
+#         for index,badge in enumerate(getattr(self,'count_badges',[])):
+#             option = QStyleOptionTab(); self.initStyleOption(option,index)
+#             rect = self.style().subElementRect(QStyle.SE_TabBarTabText,option,self)
+#             width = option.fontMetrics.horizontalAdvance(self.tabText(index))
+#             x = rect.center().x()+width//2+4
+#             y = rect.center().y()-option.fontMetrics.height()//2-10
+#             badge.move(min(x,self.tabRect(index).right()-badge.width()-3),max(3,y))
+#             badge.raise_()
 
 
 class CopyTable(RequestTable):
@@ -2897,8 +2901,9 @@ class NewItemsViewer(QDialog):
         top = QHBoxLayout(self.toolbar); top.setContentsMargins(15,12,12,12)
         heading = QLabel('요청 목록'); heading.setObjectName('sectionTitle')
         top.addWidget(heading)
-        self.new_request_notice = QLabel('새 요청이 있습니다 · BUS 신규조회'); self.new_request_notice.setObjectName('mutedLabel'); self.new_request_notice.hide()
-        top.addWidget(self.new_request_notice); top.addStretch()
+        # self.new_request_notice = QLabel('새 요청이 있습니다 · BUS 신규조회'); self.new_request_notice.setObjectName('mutedLabel'); self.new_request_notice.hide()
+        # top.addWidget(self.new_request_notice); top.addStretch()
+        top.addStretch()
         self.btn_refresh = QPushButton('BUS 신규조회'); self.btn_refresh.setObjectName('primaryButton')
         self.btn_manual = QPushButton('수동 추가')
         top.addWidget(self.btn_manual); top.addWidget(self.btn_refresh)
@@ -3708,106 +3713,107 @@ class CreateWorker(QObject):
             self.finished.emit(ok_count,fail_count)
 
 
-class BadgeToolButton(QWidget):
-    def __init__(self, *args, **kwargs):
-        target = None
-        parent = None
-        if len(args) == 1:
-            parent = args[0]
-        elif len(args) >= 2:
-            if isinstance(args[0], QAbstractButton):
-                target = args[0]
-                parent = args[1]
-            else:
-                parent = args[1]
-        else:
-            parent = kwargs.get("parent", None)
+# 알림/배지 기능 비활성화: 복원 가능하도록 기존 구현을 주석으로 보존합니다.
+# class BadgeToolButton(QWidget):
+#     def __init__(self, *args, **kwargs):
+#         target = None
+#         parent = None
+#         if len(args) == 1:
+#             parent = args[0]
+#         elif len(args) >= 2:
+#             if isinstance(args[0], QAbstractButton):
+#                 target = args[0]
+#                 parent = args[1]
+#             else:
+#                 parent = args[1]
+#         else:
+#             parent = kwargs.get("parent", None)
 
-        super().__init__(parent)
-        self._target = None
-        self._offset = QPoint(0, 1)
-        self._value = 0
-        self._lbl = QLabel(self)
-        self._lbl.setObjectName("notifBadge")
-        self._lbl.setAlignment(Qt.AlignCenter)
-        f = self._lbl.font()
-        f.setPointSize(7)
-        f.setBold(True)
-        self._lbl.setFont(f)
-        self._base_px = 7
-        self._apply_style(self._base_px)
-        self._lbl.setVisible(False)
+#         super().__init__(parent)
+#         self._target = None
+#         self._offset = QPoint(0, 1)
+#         self._value = 0
+#         self._lbl = QLabel(self)
+#         self._lbl.setObjectName("notifBadge")
+#         self._lbl.setAlignment(Qt.AlignCenter)
+#         f = self._lbl.font()
+#         f.setPointSize(7)
+#         f.setBold(True)
+#         self._lbl.setFont(f)
+#         self._base_px = 7
+#         self._apply_style(self._base_px)
+#         self._lbl.setVisible(False)
 
-        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self._lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+#         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+#         self._lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
-        if target is not None:
-            self.setTarget(target)
+#         if target is not None:
+#             self.setTarget(target)
 
-    def setTarget(self, btn: QAbstractButton):
-        if self._target is not None:
-            try:
-                self._target.removeEventFilter(self)
-            except Exception:
-                pass
-        self._target = btn
-        self._lbl.setParent(self._target)
-        self._lbl.raise_()
-        if self._target is not None:
-            self._target.installEventFilter(self)
-        self._reposition()
+#     def setTarget(self, btn: QAbstractButton):
+#         if self._target is not None:
+#             try:
+#                 self._target.removeEventFilter(self)
+#             except Exception:
+#                 pass
+#         self._target = btn
+#         self._lbl.setParent(self._target)
+#         self._lbl.raise_()
+#         if self._target is not None:
+#             self._target.installEventFilter(self)
+#         self._reposition()
 
-    def setBadge(self, n: int):
-        self._value = int(n or 0)
-        if self._value <= 0:
-            self._lbl.hide()
-            return
-        self._lbl.setText("99+" if self._value >= 100 else str(self._value))
-        self._lbl.adjustSize()
-        self._lbl.show()
-        self._lbl.raise_()
-        self._reposition()
+#     def setBadge(self, n: int):
+#         self._value = int(n or 0)
+#         if self._value <= 0:
+#             self._lbl.hide()
+#             return
+#         self._lbl.setText("99+" if self._value >= 100 else str(self._value))
+#         self._lbl.adjustSize()
+#         self._lbl.show()
+#         self._lbl.raise_()
+#         self._reposition()
 
-    def setOffset(self, dx: int, dy: int):
-        self._offset = QPoint(dx, dy)
-        self._reposition()
+#     def setOffset(self, dx: int, dy: int):
+#         self._offset = QPoint(dx, dy)
+#         self._reposition()
 
-    def setBadgeSize(self, px: int = 1):
-        self._base_px = px
-        self._apply_style(px)
-        self._lbl.adjustSize()
-        self._reposition()
+#     def setBadgeSize(self, px: int = 1):
+#         self._base_px = px
+#         self._apply_style(px)
+#         self._lbl.adjustSize()
+#         self._reposition()
 
-    def eventFilter(self, obj, ev):
-        if obj is self._target and ev.type() in (ev.Resize, ev.Move, ev.Show):
-            self._reposition()
-        return super().eventFilter(obj, ev)
+#     def eventFilter(self, obj, ev):
+#         if obj is self._target and ev.type() in (ev.Resize, ev.Move, ev.Show):
+#             self._reposition()
+#         return super().eventFilter(obj, ev)
 
-    def _reposition(self):
-        if not (self._target and self._lbl.isVisible()):
-            return
-        bw = max(self._base_px, self._lbl.width())
-        x = self._target.width() - bw + self._offset.x()
-        y = self._offset.y()
-        self._lbl.move(x, y)
+#     def _reposition(self):
+#         if not (self._target and self._lbl.isVisible()):
+#             return
+#         bw = max(self._base_px, self._lbl.width())
+#         x = self._target.width() - bw + self._offset.x()
+#         y = self._offset.y()
+#         self._lbl.move(x, y)
 
-    def _apply_style(self, px: int):
-        r = px // 2
-        pad = max(1, px // 4)
-        maxw = px * 3
+#     def _apply_style(self, px: int):
+#         r = px // 2
+#         pad = max(1, px // 4)
+#         maxw = px * 3
 
-        self._lbl.setStyleSheet(f"""
-            QLabel#notifBadge {{
-                color: white;
-                background: #E23;
-                border-radius: {r}px;
-                min-width: {px}px;
-                min-height: {px}px;
-                max-width: {maxw}px;
-                padding-left: {pad}px;
-                padding-right: {pad}px;
-            }}
-        """)
+#         self._lbl.setStyleSheet(f"""
+#             QLabel#notifBadge {{
+#                 color: white;
+#                 background: #E23;
+#                 border-radius: {r}px;
+#                 min-width: {px}px;
+#                 min-height: {px}px;
+#                 max-width: {maxw}px;
+#                 padding-left: {pad}px;
+#                 padding-right: {pad}px;
+#             }}
+#         """)
 
 # Drawing helpers keep visual presentation separate from the API payload model.
 class RequestDelegate(QStyledItemDelegate):
@@ -3925,10 +3931,10 @@ class AccessManager(QMainWindow):
     trigger_session_cancel = pyqtSignal()
     trigger_session_stop = pyqtSignal()
     trigger_session_process = pyqtSignal(object)
-    trigger_watcher_start = pyqtSignal()
-    trigger_watcher_stop  = pyqtSignal()
+    # trigger_watcher_start = pyqtSignal()
+    # trigger_watcher_stop  = pyqtSignal()
     startup_result = pyqtSignal(str,bool,str)
-    trigger_watcher_collect = pyqtSignal()
+    # trigger_watcher_collect = pyqtSignal()
     COL_SELECT  = 0
     COL_KIND    = 1
     COL_REQTYPE = 2
@@ -4069,33 +4075,33 @@ class AccessManager(QMainWindow):
         super().__init__()
         self._startup_active = startup
         self._list_loaded = {'access':False,'project':False}
-        self._known_counts = {'access':0,'project':0}
+        # self._known_counts = {'access':0,'project':0}
         for folder in (DL_DIR, LOG_DIR, CONF_DIR, DEBUG_DIR):
             os.makedirs(folder, exist_ok=True)
-        self._notif_counts = {"신규미완료": 0, "진행-부여": 0, "진행-제거": 0, "종료-부여": 0, "종료-제거": 0}
+        # self._notif_counts = {"신규미완료": 0, "진행-부여": 0, "진행-제거": 0, "종료-부여": 0, "종료-제거": 0}
         self.setWindowTitle(f"{APP_NAME}")
         self.resize(1060, 900)
         self._init_ui()
-        self._notify_refresh_mins = 10
-        try:
-            if os.path.exists(CONF_FILE):
-                with open(CONF_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    self._notify_refresh_mins = int(data.get("notify_refresh_min", self._notify_refresh_mins))
-        except Exception:
-            pass
-        self.watch_thread = QThread(self)
-        self.watch_session = BusWatcher(DL_DIR)
-        self.watch_session.moveToThread(self.watch_thread)
-        self.watch_thread.start()
-        self.trigger_watcher_start.connect(self.watch_session.start, type=Qt.QueuedConnection)
-        self.trigger_watcher_stop.connect(self.watch_session.stop, type=Qt.QueuedConnection)
-        self.trigger_watcher_collect.connect(self.watch_session.collect_counts, type=Qt.QueuedConnection)
-        self.watch_session.countsReady.connect(self._on_counts_ready)
-        self.notify_timer = QTimer(self)
-        self.notify_timer.setInterval(max(5, int(self._notify_refresh_mins)) * 60 * 1000)
-        self.notify_timer.timeout.connect(self.refresh_notifications)
-        self.notify_timer.start()
+        # self._notify_refresh_mins = 10
+        # try:
+            # if os.path.exists(CONF_FILE):
+                # with open(CONF_FILE, "r", encoding="utf-8") as f:
+                    # data = json.load(f)
+                    # self._notify_refresh_mins = int(data.get("notify_refresh_min", self._notify_refresh_mins))
+        # except Exception:
+            # pass
+        # self.watch_thread = QThread(self)
+        # self.watch_session = BusWatcher(DL_DIR)
+        # self.watch_session.moveToThread(self.watch_thread)
+        # self.watch_thread.start()
+        # self.trigger_watcher_start.connect(self.watch_session.start, type=Qt.QueuedConnection)
+        # self.trigger_watcher_stop.connect(self.watch_session.stop, type=Qt.QueuedConnection)
+        # self.trigger_watcher_collect.connect(self.watch_session.collect_counts, type=Qt.QueuedConnection)
+        # self.watch_session.countsReady.connect(self._on_counts_ready)
+        # self.notify_timer = QTimer(self)
+        # self.notify_timer.setInterval(max(5, int(self._notify_refresh_mins)) * 60 * 1000)
+        # self.notify_timer.timeout.connect(self.refresh_notifications)
+        # self.notify_timer.start()
         self._ensure_logo_and_set_title()
         self.session_thread = QThread(self)
         self.session = BusSessionManager(DL_DIR)
@@ -4105,14 +4111,14 @@ class AccessManager(QMainWindow):
         self.session.processed.connect(self._on_session_processed)
         self.session.busyChanged.connect(self._on_session_busy)
         self.session_thread.start()
-        self.watch_session.readyChanged.connect(self._on_watcher_ready)
+        # self.watch_session.readyChanged.connect(self._on_watcher_ready)
         self.trigger_session_start.connect(self.session.start, type=Qt.QueuedConnection)
         self.trigger_session_download.connect(self.session.download_list, type=Qt.QueuedConnection)
         self.trigger_new_download.connect(self.session.download_new_list,type=Qt.QueuedConnection)
         self.trigger_session_process.connect(self.session.process, type=Qt.QueuedConnection)
         self.trigger_session_cancel.connect(self.session.cancel_current, type=Qt.QueuedConnection)
         self.trigger_session_stop.connect(self.session.stop, type=Qt.QueuedConnection)
-        QTimer.singleShot(1000, self.refresh_notifications)
+        # QTimer.singleShot(1000, self.refresh_notifications)
         self.api_config = load_api_config()
         self.api_thread = None
         self.api_worker = None
@@ -4128,9 +4134,9 @@ class AccessManager(QMainWindow):
         self.current_mode = ""
         self.setAcceptDrops(True)
         self._load_creds()
-        if self.creds.get("id") and self.creds.get("pw"):
-            self.watch_session.set_creds(self.creds["id"], self.creds["pw"])
-            self.trigger_watcher_start.emit()
+        # if self.creds.get("id") and self.creds.get("pw"):
+            # self.watch_session.set_creds(self.creds["id"], self.creds["pw"])
+            # self.trigger_watcher_start.emit()
         self._log(f"{APP_NAME} 실행")
         self._buf_out = {}
         self.remove_fail_tolerance = int(self.creds.get("remove_fail_tol", 5))
@@ -4192,13 +4198,13 @@ class AccessManager(QMainWindow):
         self.columns_action.setCheckable(True)
         self.columns_action.toggled.connect(self._toggle_detail_columns)
         menu.addAction('사용 안내',self._show_help)
-        menu.addAction('BUS 요청 알림',self._open_notif_popup)
+        # menu.addAction('BUS 요청 알림',self._open_notif_popup)
         self.settings_button.setMenu(menu)
         self.header_bar.addWidget(self.settings_button)
         self.btn_theme = QToolButton(); self.btn_theme.setObjectName('utilityButton')
         self.btn_theme.clicked.connect(self._toggle_theme)
         self.header_bar.addWidget(self.btn_theme)
-        self.btn_notif = QToolButton(self); self.btn_notif.hide()
+        # self.btn_notif = QToolButton(self); self.btn_notif.hide()
         self._title_widget = self.brand_title
         main.addWidget(header)
 
@@ -4213,7 +4219,8 @@ class AccessManager(QMainWindow):
         connection.addStretch()
         main.addWidget(self.connection_bar)
 
-        self.tabs = WorkspaceTabBar(); self.tabs.setObjectName('workspaceTabs')
+        # self.tabs = WorkspaceTabBar(); self.tabs.setObjectName('workspaceTabs')
+        self.tabs = QTabBar(); self.tabs.setObjectName('workspaceTabs')
         self.tabs.setExpanding(False)
         self.tabs.setElideMode(Qt.ElideNone)
         self.tabs.addTab('권한 요청'); self.tabs.addTab('신규 프로젝트')
@@ -4222,8 +4229,8 @@ class AccessManager(QMainWindow):
         tab_layout.setContentsMargins(18,0,18,0); tab_layout.setSpacing(0)
         tab_layout.addWidget(self.tabs)
         tab_layout.addStretch()
-        self.tabs.add_count_badges()
-        self.tab_count_badges = self.tabs.count_badges
+        # self.tabs.add_count_badges()
+        # self.tab_count_badges = self.tabs.count_badges
         main.addWidget(tab_row)
         self.workspaces = QStackedWidget()
         self.request_page = QWidget()
@@ -4233,8 +4240,9 @@ class AccessManager(QMainWindow):
         toolbar_layout = QHBoxLayout(toolbar); toolbar_layout.setContentsMargins(15,12,12,12)
         heading = QLabel('요청 목록'); heading.setObjectName('sectionTitle')
         toolbar_layout.addWidget(heading)
-        self.new_request_notice = QLabel('새 요청이 있습니다 · BUS 요청 조회'); self.new_request_notice.setObjectName('mutedLabel'); self.new_request_notice.hide()
-        toolbar_layout.addWidget(self.new_request_notice); toolbar_layout.addStretch()
+        # self.new_request_notice = QLabel('새 요청이 있습니다 · BUS 요청 조회'); self.new_request_notice.setObjectName('mutedLabel'); self.new_request_notice.hide()
+        # toolbar_layout.addWidget(self.new_request_notice); toolbar_layout.addStretch()
+        toolbar_layout.addStretch()
         self.btn_request = QPushButton('BUS 요청 조회'); self.btn_request.setObjectName('primaryButton'); self.btn_request.clicked.connect(self._request_and_import)
         self.btn_file = QPushButton('엑셀 불러오기'); self.btn_file.clicked.connect(self.choose_file)
         self.btn_manual = QPushButton('수동 입력')
@@ -4465,94 +4473,94 @@ class AccessManager(QMainWindow):
         self.progress_panel.setVisible(bool(message))
         self.prg.hide()
 
-    def refresh_notifications(self):
-        if hasattr(self, "watch_session") and self.watch_session and self.watch_session.is_ready():
-            self.trigger_watcher_collect.emit()
-            return
-        self._on_counts_ready({"신규미완료":0,"진행-부여":0,"진행-제거":0,"종료-부여":0,"종료-제거":0})
+    # def refresh_notifications(self):
+        # if hasattr(self, "watch_session") and self.watch_session and self.watch_session.is_ready():
+            # self.trigger_watcher_collect.emit()
+            # return
+        # self._on_counts_ready({"신규미완료":0,"진행-부여":0,"진행-제거":0,"종료-부여":0,"종료-제거":0})
 
-    @pyqtSlot(dict)
-    def _on_counts_ready(self, counts: dict):
-        counts = counts or {}
-        def _toi(x):
-            try:
-                return int(str(x).strip())
-            except Exception:
-                return 0
+    # @pyqtSlot(dict)
+    # def _on_counts_ready(self, counts: dict):
+        # counts = counts or {}
+        # def _toi(x):
+            # try:
+                # return int(str(x).strip())
+            # except Exception:
+                # return 0
 
-        self._notif_counts = {
-            "신규미완료": _toi(counts.get("신규미완료", 0)),
-            "진행-부여": _toi(counts.get("진행-부여", 0)),
-            "진행-제거": _toi(counts.get("진행-제거", 0)),
-            "종료-부여": _toi(counts.get("종료-부여", 0)),
-            "종료-제거": _toi(counts.get("종료-제거", 0)),
-        }
+        # self._notif_counts = {
+            # "신규미완료": _toi(counts.get("신규미완료", 0)),
+            # "진행-부여": _toi(counts.get("진행-부여", 0)),
+            # "진행-제거": _toi(counts.get("진행-제거", 0)),
+            # "종료-부여": _toi(counts.get("종료-부여", 0)),
+            # "종료-제거": _toi(counts.get("종료-제거", 0)),
+        # }
 
-        self._refresh_request_count_badge()
+        # self._refresh_request_count_badge()
 
-    def _refresh_request_count_badge(self):
-        counts = getattr(self,'_notif_counts',{})
-        totals = [sum(counts.get(key,0) for key in ('진행-부여','진행-제거','종료-부여','종료-제거')),
-                  counts.get('신규미완료',0)]
-        for badge,total in zip(self.tab_count_badges,totals):
-            badge.setText('99+' if total>99 else str(total))
-            badge.setVisible(total>0)
-        self._refresh_new_request_notice()
+    # def _refresh_request_count_badge(self):
+        # counts = getattr(self,'_notif_counts',{})
+        # totals = [sum(counts.get(key,0) for key in ('진행-부여','진행-제거','종료-부여','종료-제거')),
+                  # counts.get('신규미완료',0)]
+        # for badge,total in zip(self.tab_count_badges,totals):
+            # badge.setText('99+' if total>99 else str(total))
+            # badge.setVisible(total>0)
+        # self._refresh_new_request_notice()
 
     def _mark_list_loaded(self,kind,count):
         self._list_loaded[kind] = True
-        self._known_counts[kind] = count
-        if kind=='project':
-            self._notif_counts['신규미완료'] = count
-        else:
-            for key in ('진행-부여','진행-제거','종료-부여','종료-제거'):
-                self._notif_counts[key] = 0
-            for row in range(self.table.rowCount()):
-                key = self._get(row,self.COL_KIND)+'-'+('제거' if self._get(row,self.COL_REQTYPE)==REQ_RELEASE else '부여')
-                if key in self._notif_counts:
-                    self._notif_counts[key] += 1
-        self._refresh_request_count_badge()
+        # self._known_counts[kind] = count
+        # if kind=='project':
+            # self._notif_counts['신규미완료'] = count
+        # else:
+            # for key in ('진행-부여','진행-제거','종료-부여','종료-제거'):
+                # self._notif_counts[key] = 0
+            # for row in range(self.table.rowCount()):
+                # key = self._get(row,self.COL_KIND)+'-'+('제거' if self._get(row,self.COL_REQTYPE)==REQ_RELEASE else '부여')
+                # if key in self._notif_counts:
+                    # self._notif_counts[key] += 1
+        # self._refresh_request_count_badge()
         table = self.table if kind=='access' else self._newdlg.tbl
         table.set_empty_message('대기 중인 요청이 없습니다.')
-        self._refresh_new_request_notice()
+        # self._refresh_new_request_notice()
 
-    def _refresh_new_request_notice(self):
-        counts = getattr(self,'_notif_counts',{})
-        access = sum(counts.get(key,0) for key in ('진행-부여','진행-제거','종료-부여','종료-제거'))
-        known = getattr(self,'_known_counts',{})
-        self.new_request_notice.setVisible(access>known.get('access',0))
-        viewer = getattr(self,'_newdlg',None)
-        if viewer is not None:
-            viewer.new_request_notice.setVisible(counts.get('신규미완료',0)>known.get('project',0))
+    # def _refresh_new_request_notice(self):
+        # counts = getattr(self,'_notif_counts',{})
+        # access = sum(counts.get(key,0) for key in ('진행-부여','진행-제거','종료-부여','종료-제거'))
+        # known = getattr(self,'_known_counts',{})
+        # self.new_request_notice.setVisible(access>known.get('access',0))
+        # viewer = getattr(self,'_newdlg',None)
+        # if viewer is not None:
+            # viewer.new_request_notice.setVisible(counts.get('신규미완료',0)>known.get('project',0))
 
-    def _on_watcher_ready(self, ok: bool, msg: str):
-        self._refresh_connection_strip()
-        if hasattr(self, "btn_notif"):
-            self.btn_notif.setEnabled(bool(ok))
-            self.btn_notif.setToolTip("요청건 알림" if ok else "세션 준비 안됨")
+    # def _on_watcher_ready(self, ok: bool, msg: str):
+        # self._refresh_connection_strip()
+        # if hasattr(self, "btn_notif"):
+            # self.btn_notif.setEnabled(bool(ok))
+            # self.btn_notif.setToolTip("요청건 알림" if ok else "세션 준비 안됨")
 
-        if ok:
-            QTimer.singleShot(0, lambda: self.trigger_watcher_collect.emit())
-        else:
-            self._on_counts_ready({"신규미완료":0,"진행-부여":0,"진행-제거":0,"종료-부여":0,"종료-제거":0})
+        # if ok:
+            # QTimer.singleShot(0, lambda: self.trigger_watcher_collect.emit())
+        # else:
+            # self._on_counts_ready({"신규미완료":0,"진행-부여":0,"진행-제거":0,"종료-부여":0,"종료-제거":0})
 
-    def _open_notif_popup(self):
-        if not hasattr(self, "_notif_counts") or not isinstance(self._notif_counts, dict):
-            self._notif_counts = {"신규미완료":0,"진행-부여":0,"진행-제거":0,"종료-부여":0,"종료-제거":0}
-        c = self._notif_counts
-        menu = QMenu(self)
-        n_new  = int(self._notif_counts.get("신규미완료", 0))
-        n_pg_g = int(self._notif_counts.get("진행-부여", 0))
-        n_pg_r = int(self._notif_counts.get("진행-제거", 0))
-        n_ed_g = int(self._notif_counts.get("종료-부여", 0))
-        n_ed_r = int(self._notif_counts.get("종료-제거", 0))
-        menu.addAction(f"폴더 생성 요청: {n_new}")
-        menu.addAction(f"진행-부여: {n_pg_g}")
-        menu.addAction(f"진행-제거: {n_pg_r}")
-        menu.addAction(f"종료-부여: {n_ed_g}")
-        menu.addAction(f"종료-제거: {n_ed_r}")
-        pos = self.settings_button.mapToGlobal(self.settings_button.rect().bottomRight())
-        menu.popup(pos)
+    # def _open_notif_popup(self):
+        # if not hasattr(self, "_notif_counts") or not isinstance(self._notif_counts, dict):
+            # self._notif_counts = {"신규미완료":0,"진행-부여":0,"진행-제거":0,"종료-부여":0,"종료-제거":0}
+        # c = self._notif_counts
+        # menu = QMenu(self)
+        # n_new  = int(self._notif_counts.get("신규미완료", 0))
+        # n_pg_g = int(self._notif_counts.get("진행-부여", 0))
+        # n_pg_r = int(self._notif_counts.get("진행-제거", 0))
+        # n_ed_g = int(self._notif_counts.get("종료-부여", 0))
+        # n_ed_r = int(self._notif_counts.get("종료-제거", 0))
+        # menu.addAction(f"폴더 생성 요청: {n_new}")
+        # menu.addAction(f"진행-부여: {n_pg_g}")
+        # menu.addAction(f"진행-제거: {n_pg_r}")
+        # menu.addAction(f"종료-부여: {n_ed_g}")
+        # menu.addAction(f"종료-제거: {n_ed_r}")
+        # pos = self.settings_button.mapToGlobal(self.settings_button.rect().bottomRight())
+        # menu.popup(pos)
 
     def open_new_viewer(self):
         if self.tabs.currentIndex()!=1:
@@ -4587,7 +4595,7 @@ class AccessManager(QMainWindow):
         self.project_page_layout.addWidget(self._newdlg)
         self._newdlg.btn_refresh.clicked.connect(self._load_new_items)
         self._newdlg.show()
-        self._refresh_new_request_notice()
+        # self._refresh_new_request_notice()
 
     def _load_new_items(self):
         if self.api_thread is not None or self.session.is_busy():
@@ -5001,20 +5009,22 @@ class AccessManager(QMainWindow):
             event.ignore()
             QTimer.singleShot(200,self.close)
             return
-        self.notify_timer.stop()
+        # self.notify_timer.stop()
         self._progress_timer.stop()
         self.session.cancel_current()
-        if self.session.is_busy() or self.watch_session._mgr.is_busy():
+        # if self.session.is_busy() or self.watch_session._mgr.is_busy():
+        if self.session.is_busy():
             event.ignore()
             QTimer.singleShot(200,self.close)
             return
         if not self._shutdown_started:
             self._shutdown_started = True
             self.session.stopped.connect(self.session_thread.quit, type=Qt.DirectConnection)
-            self.watch_session.stopped.connect(self.watch_thread.quit, type=Qt.DirectConnection)
+            # self.watch_session.stopped.connect(self.watch_thread.quit, type=Qt.DirectConnection)
             self.trigger_session_stop.emit()
-            self.trigger_watcher_stop.emit()
-        if self.session_thread.isRunning() or self.watch_thread.isRunning():
+            # self.trigger_watcher_stop.emit()
+        # if self.session_thread.isRunning() or self.watch_thread.isRunning():
+        if self.session_thread.isRunning():
             event.ignore()
             QTimer.singleShot(100,self.close)
             return
@@ -5040,11 +5050,11 @@ class AccessManager(QMainWindow):
                 "notify_refresh_min": int(notify_mins),
             }
 
-            if uid and pw:
-                self.watch_session.set_creds(uid, pw)
-                self.trigger_watcher_start.emit()
-            else:
-                self.trigger_watcher_stop.emit()
+            # if uid and pw:
+                # self.watch_session.set_creds(uid, pw)
+                # self.trigger_watcher_start.emit()
+            # else:
+                # self.trigger_watcher_stop.emit()
 
             data = {
                 "theme": getattr(self, "current_theme", "light"),
@@ -5061,8 +5071,8 @@ class AccessManager(QMainWindow):
             except Exception:
                 pass
 
-            self._notify_refresh_mins = int(notify_mins)
-            self.notify_timer.setInterval(max(5, self._notify_refresh_mins) * 60 * 1000)
+            # self._notify_refresh_mins = int(notify_mins)
+            # self.notify_timer.setInterval(max(5, self._notify_refresh_mins) * 60 * 1000)
             self.debug_enabled = bool(debug_on)
             self.session.set_debug(self.debug_enabled, DEBUG_DIR)
             self.remove_fail_tolerance = int(tol)
@@ -5731,7 +5741,7 @@ class AccessManager(QMainWindow):
 
 
     def _switch_workspace(self,index):
-        self._refresh_request_count_badge()
+        # self._refresh_request_count_badge()
         self.workspaces.setCurrentIndex(index)
         self.actions_bar.setVisible(index==0)
         self.summary_label.setVisible(index==0)
@@ -5859,8 +5869,10 @@ class AccessManager(QMainWindow):
         api_ok = getattr(self,'_api_verified',False)
         self.api_status_label.setText('●  API 연결됨' if api_ok else '○  API 미확인')
         self.api_status_label.setStyleSheet(f"color:{t['green'] if api_ok else t['muted']};")
-        session = getattr(self,'session',None); watcher = getattr(self,'watch_session',None)
-        bus_ok = bool((session and session.is_ready()) or (watcher and watcher.is_ready()))
+        # session = getattr(self,'session',None); watcher = getattr(self,'watch_session',None)
+        # bus_ok = bool((session and session.is_ready()) or (watcher and watcher.is_ready()))
+        session = getattr(self,'session',None)
+        bus_ok = bool(session and session.is_ready())
         self.bus_status_label.setText('●  BUS 로그인됨' if bus_ok else '○  BUS 미연결')
         self.bus_status_label.setStyleSheet(f"color:{t['green'] if bus_ok else t['muted']};")
         parsed = urlsplit(getattr(self,'api_config',{}).get('base_url',DEFAULT_API_URL))
