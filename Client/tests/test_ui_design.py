@@ -185,8 +185,9 @@ class DesignTests(unittest.TestCase):
         self.assertTrue(w.table.verticalHeader().isHidden()==False)
         self.assertFalse(v.tbl.verticalHeader().isHidden())
         self.assertFalse(v.btn_stop.isEnabled())
-        self.assertFalse(v.chk_dry.isHidden())
-        self.assertIn('미리보기',v.chk_dry.text())
+        self.assertEqual(v.btn_preview.text(),'미리보기')
+        self.assertFalse(hasattr(v,'chk_dry'))
+        self.assertLess(pos(v.btn_preview).x(),pos(v.btn_create).x())
         w.tabs.setCurrentIndex(0)
         self.assertTrue(v.actions_bar.isHidden())
 

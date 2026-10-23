@@ -85,7 +85,7 @@ HELP_PAGES = (
     ("처음 사용하기", (
         ("01 · 연결 확인", "프로그램을 켜면 서버 연결과 BUS 로그인 후 요청을 불러옵니다. 로그인창이 나오면 BUS 계정과 암호를 입력하세요. 계정 저장은 직접 선택할 수 있습니다."),
         ("02 · 요청 살펴보기", "권한 요청 또는 신규 프로젝트 탭에서 목록을 확인하세요. 행을 선택하면 오른쪽 선택 요청 상세에 해당 요청의 정보와 진행 상태가 표시됩니다."),
-        ("03 · 확인하고 실행", "처리할 항목의 체크박스를 선택하세요. 권한 요청은 미리보기로 먼저 확인한 뒤 선택 실행을 누르세요. 신규 프로젝트는 미리보기 (Dry Run)를 선택해 확인하고, 실제 처리할 때는 해제한 뒤 선택 실행을 누르세요."),
+        ("03 · 확인하고 실행", "처리할 항목의 체크박스를 선택하세요. 권한 요청은 미리보기로 먼저 확인한 뒤 선택 실행을 누르세요. 신규 프로젝트도 미리보기로 확인한 뒤 선택실행을 누르세요."),
         ("04 · 완료 확인", "작업 결과를 목록과 오른쪽 상세에서 확인하세요. BUS 자동 완료 옵션을 켜 두면 실제 작업이 모두 성공한 BUS 요청만 완료 처리됩니다. 수동 입력과 엑셀로 추가한 항목은 BUS 완료 대상이 아닙니다."),
     )),
     ("버튼 안내", (
@@ -100,7 +100,7 @@ HELP_PAGES = (
         ("문제를 고친 뒤 다시 실행하려면?", "폴더 누락 등 표시된 원인을 먼저 해결하세요. 실패하거나 부분 성공한 권한 요청을 체크하고 선택 실행을 누른 뒤 재시도 안내를 확인하세요. 이전에 성공한 단계는 유지하고 남은 단계를 다시 처리합니다."),
         ("시간 초과 또는 결과 확인이 안 될 때", "오래 걸리는 작업은 아직 처리 중일 수 있습니다. 권한 요청의 BUS 완료 재확인으로 서버 상태를 확인하세요. 실패가 확인되면 원인을 해결한 뒤 재시도하고, 결과가 확실하지 않다면 중복 실행 전에 관리자에게 확인하세요."),
         ("목록이 비어 있거나 조회에 실패했을 때", "상단의 서버 연결과 BUS 로그인 상태를 확인하고 해당 탭의 BUS 조회 버튼을 눌러 주세요. 연결 정보나 계정이 바뀌었다면 톱니바퀴 메뉴의 설정에서 수정할 수 있습니다."),
-        ("BUS 요청을 직접 수정할 때", "BUS에서 가져온 행의 내용을 편집하면 수동 요청으로 바뀌고 이전 성공 결과는 사용할 수 없게 됩니다. 수정한 항목은 BUS 자동 완료 대상에서 제외됩니다."),
+        ("목록에서 수정하거나 삭제할 때", "BUS에서 조회한 권한 요청은 목록에서 수정할 수 없습니다. 직접 입력하거나 엑셀로 불러온 권한 요청만 수정할 수 있습니다. 두 목록에서 마우스 오른쪽 버튼을 누르면 행 삭제, 선택 행 삭제, 전체 삭제를 사용할 수 있습니다. 삭제는 화면 목록에만 적용되며 BUS 요청이나 서버 이력은 삭제하지 않습니다."),
     )),
     ("설정과 기록", (
         ("연결과 로그인 설정", "오른쪽 위 톱니바퀴 메뉴에서 서버 주소, API Key와 BUS 로그인 정보를 관리하세요. API Key는 관리자에게 받은 값을 입력합니다. 저장한 API Key는 이 PC의 설정 파일에 평문으로 보관됩니다."),
@@ -2691,10 +2691,18 @@ class StartupLoadingDialog(QDialog):
         self.open_main(); event.accept()
 
 
+class FocuslessItemDelegate(QStyledItemDelegate):
+    """Hide the cell focus outline while preserving keyboard navigation."""
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        option.state &= ~QStyle.State_HasFocus
+
+
 class RequestTable(QTableWidget):
     """A viewport label distinguishes an empty result from a pending fetch."""
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
+        self.setItemDelegate(FocuslessItemDelegate(self))
         self.empty_label = QLabel('아직 조회하지 않았습니다.',self.viewport())
         self.empty_label.setObjectName('mutedLabel')
         self.empty_label.setStyleSheet('background:transparent;')
@@ -3028,6 +3036,8 @@ class NewItemsViewer(QDialog):
 
         lay = QVBoxLayout(self)
         self.tbl = RequestTable(0, 0, self)
+        self.tbl.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tbl.customContextMenuRequested.connect(self._open_table_menu)
 
         hdr = CheckBoxHeader(Qt.Horizontal, self.tbl)
         hdr.stateChanged.connect(self._toggle_all_rows)
@@ -3082,7 +3092,9 @@ class NewItemsViewer(QDialog):
         self.actions_bar = QWidget(); self.actions_bar.setObjectName('actionsBar')
         btns = QHBoxLayout(self.actions_bar); btns.setContentsMargins(20,12,20,10)
         self.btn_create = QPushButton('선택실행'); self.btn_create.setObjectName('primaryButton')
-        self.btn_create.clicked.connect(self._on_create_clicked)
+        self.btn_create.clicked.connect(lambda: self._on_create_clicked(dry_run=False))
+        self.btn_preview = QPushButton('미리보기')
+        self.btn_preview.clicked.connect(lambda: self._on_create_clicked(dry_run=True))
 
         self.status_lbl = QLabel("")
         self.status_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -3102,17 +3114,69 @@ class NewItemsViewer(QDialog):
         self._last_worker_msg = ""
         self.worker_thread = None
         self.worker = None
-        self.chk_dry = QCheckBox('Dry Run')
         self.chk_auto_complete = QCheckBox('실제 성공 후 BUS 완료')
         self.chk_auto_complete.setChecked(True)
         self.btn_stop = QPushButton('중지')
         self.btn_stop.clicked.connect(lambda: self.worker.stop() if self.worker else None)
-        self.chk_dry.setText('미리보기 (Dry Run)')
-        btns.addWidget(self.chk_dry)
         btns.addWidget(self.chk_auto_complete); btns.addStretch()
-        btns.addWidget(self.btn_create); btns.addWidget(self.btn_stop)
+        btns.addWidget(self.btn_preview); btns.addWidget(self.btn_create); btns.addWidget(self.btn_stop)
         self.btn_stop.setObjectName('dangerButton')
         self.btn_stop.setEnabled(False)
+
+    def _can_delete_rows(self):
+        return (self.tbl.contextMenuPolicy() == Qt.CustomContextMenu
+                and self.btn_manual.isEnabled() and self.worker_thread is None
+                and not self.host._closing and self.host.api_thread is None
+                and not self.host._waiting_for_bus and not self.host.session.is_busy())
+
+    def _open_table_menu(self, pos):
+        if not self._can_delete_rows():
+            return
+        row = self.tbl.indexAt(pos).row()
+        menu = QMenu(self)
+        delete_row = menu.addAction('행 삭제')
+        delete_checked = menu.addAction('선택 행 삭제')
+        delete_all = menu.addAction('전체 삭제')
+        delete_row.setEnabled(row >= 0)
+        delete_checked.setEnabled(any(self._is_row_checked(r) for r in range(self.tbl.rowCount())))
+        delete_all.setEnabled(self.tbl.rowCount() > 0)
+        action = menu.exec_(self.tbl.viewport().mapToGlobal(pos))
+        if action == delete_row:
+            self._delete_row(row)
+        elif action == delete_checked:
+            self._delete_checked_rows()
+        elif action == delete_all:
+            self._delete_all_rows()
+
+    def _is_row_checked(self, row):
+        holder = self.tbl.cellWidget(row, 0)
+        checkbox = holder.findChild(QCheckBox) if holder else None
+        return bool(checkbox and checkbox.isChecked())
+
+    def _after_delete(self):
+        if not self.tbl.rowCount():
+            self.tbl.setCurrentCell(-1, -1)
+            self.tbl.set_empty_message('표시할 요청이 없습니다. BUS 신규조회 또는 수동 추가를 사용하세요.')
+        self._refresh_project_detail()
+
+    def _delete_row(self, row):
+        if self._can_delete_rows() and 0 <= row < self.tbl.rowCount():
+            self.tbl.removeRow(row)
+            self._after_delete()
+
+    def _delete_checked_rows(self):
+        if not self._can_delete_rows():
+            return
+        for row in range(self.tbl.rowCount()-1, -1, -1):
+            if self._is_row_checked(row):
+                self.tbl.removeRow(row)
+        self._after_delete()
+
+    def _delete_all_rows(self):
+        if not self._can_delete_rows():
+            return
+        self.tbl.setRowCount(0)
+        self._after_delete()
 
     def _set_busy(self, on: bool, msg: str = ""):
         self.status_lbl.setText(msg or "")
@@ -3120,7 +3184,8 @@ class NewItemsViewer(QDialog):
         self.btn_manual.setEnabled(not on)
         self.btn_create.setEnabled(not on)
         self.btn_refresh.setEnabled(not on)
-        self.chk_dry.setEnabled(not on)
+        self.btn_preview.setEnabled(not on)
+        self.tbl.setContextMenuPolicy(Qt.PreventContextMenu if on else Qt.CustomContextMenu)
         self.chk_auto_complete.setEnabled(not on)
         self.btn_stop.setEnabled(on)
 
@@ -3154,7 +3219,7 @@ class NewItemsViewer(QDialog):
         self.tbl.setItem(row,self._status_col,QTableWidgetItem('실행 대기'))
         self.tbl.setCurrentCell(row,self._hidx['프로젝트코드'])
         self._refresh_project_detail()
-        self.status_lbl.setText('수동 요청을 추가했습니다. Dry Run 또는 API 생성을 실행하세요.')
+        self.status_lbl.setText('수동 요청을 추가했습니다. 미리보기 또는 선택실행을 누르세요.')
 
 
     def _on_manual_clicked(self):
@@ -3332,7 +3397,7 @@ class NewItemsViewer(QDialog):
         return items
 
 
-    def _on_create_clicked(self):
+    def _on_create_clicked(self, dry_run=False):
         parent = self.host
         if parent._closing or parent._waiting_for_bus or self.worker_thread is not None or parent.api_thread is not None or parent.session.is_busy():
             return
@@ -3368,7 +3433,7 @@ class NewItemsViewer(QDialog):
         parent._set_running_ui(True)
         self.worker_thread = QThread(self)
         self.worker = CreateWorker(items,dict(parent.creds),parent._api_client(),
-                                   dry_run=self.chk_dry.isChecked(),
+                                   dry_run=dry_run,
                                    auto_complete=self.chk_auto_complete.isChecked(),
                                    requested_by=parent._requester())
         self.worker.moveToThread(self.worker_thread)
@@ -3958,7 +4023,7 @@ class CreateWorker(QObject):
 #         """)
 
 # Drawing helpers keep visual presentation separate from the API payload model.
-class RequestDelegate(QStyledItemDelegate):
+class RequestDelegate(FocuslessItemDelegate):
     def __init__(self,host):
         super().__init__(host.table)
         self.host = host
@@ -5288,7 +5353,9 @@ class AccessManager(QMainWindow):
         ]
         if newdlg is not None:
             to_disable.extend([newdlg.btn_manual,newdlg.btn_refresh,newdlg.btn_create,
-                               newdlg.chk_dry,newdlg.chk_auto_complete])
+                               newdlg.btn_preview,newdlg.chk_auto_complete])
+        if newdlg is not None:
+            newdlg.tbl.setContextMenuPolicy(Qt.PreventContextMenu if running else Qt.CustomContextMenu)
         for w in to_disable:
             if w:
                 w.setEnabled(not running)
@@ -5608,6 +5675,8 @@ class AccessManager(QMainWindow):
 
 
     def _open_table_menu(self, pos):
+        if self.table.contextMenuPolicy() != Qt.CustomContextMenu:
+            return
         row = self.table.indexAt(pos).row()
         m = QMenu(self)
         act_del_row = m.addAction("행 삭제")
@@ -5625,6 +5694,8 @@ class AccessManager(QMainWindow):
             self._delete_all_rows()
 
     def _delete_all_rows(self):
+        if self.table.contextMenuPolicy() != Qt.CustomContextMenu:
+            return
         self.table.blockSignals(True)
         try:
             self.table.setRowCount(0)
@@ -5632,6 +5703,8 @@ class AccessManager(QMainWindow):
             self.table.blockSignals(False)
 
     def _delete_row(self, row: int):
+        if self.table.contextMenuPolicy() != Qt.CustomContextMenu:
+            return
         if row < 0 or row >= self.table.rowCount():
             return
         self.table.removeRow(row)
@@ -5647,6 +5720,8 @@ class AccessManager(QMainWindow):
         return bool(cb and cb.isChecked())
 
     def _delete_checked_rows(self):
+        if self.table.contextMenuPolicy() != Qt.CustomContextMenu:
+            return
         for r in range(self.table.rowCount()-1, -1, -1):
             if self._is_row_checked(r):
                 self.table.removeRow(r)
@@ -5777,6 +5852,12 @@ class AccessManager(QMainWindow):
         if item:
             old = self.table.blockSignals(True)
             item.setData(Qt.UserRole, dict(meta))
+            editable = meta.get('source') == 'test-client'
+            for col in self.EDITABLE_COLS:
+                cell = self.table.item(row, col)
+                if cell:
+                    flags = cell.flags() & ~Qt.ItemIsEditable
+                    cell.setFlags(flags | Qt.ItemIsEditable if editable else flags)
             self.table.blockSignals(old)
             self._schedule_ui_refresh()
 
