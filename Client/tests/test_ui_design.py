@@ -36,7 +36,7 @@ class DesignTests(unittest.TestCase):
         self.assertGreater(pos(w.detail_panel).x(),pos(w.table).x()+w.table.width()-5)
         self.assertGreater(pos(w.logs_panel).y(),pos(w.table).y()+w.table.height()-5)
         self.assertGreater(pos(w.actions_bar).y(),pos(w.logs_panel).y()+w.logs_panel.height()-5)
-        self.assertEqual(w.btn_preview.text(),'미리보기')
+        self.assertEqual(w.btn_preview.text(),'요청 검증')
         self.assertEqual(w.btn_run_execute.text(),'선택 실행')
         self.assertEqual(w.btn_run_complete.text(),'BUS 완료 재확인')
 
@@ -185,7 +185,7 @@ class DesignTests(unittest.TestCase):
         self.assertTrue(w.table.verticalHeader().isHidden()==False)
         self.assertFalse(v.tbl.verticalHeader().isHidden())
         self.assertFalse(v.btn_stop.isEnabled())
-        self.assertEqual(v.btn_preview.text(),'미리보기')
+        self.assertEqual(v.btn_preview.text(),'요청 검증')
         self.assertFalse(hasattr(v,'chk_dry'))
         self.assertLess(pos(v.btn_preview).x(),pos(v.btn_create).x())
         w.tabs.setCurrentIndex(0)

@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from folder_grant_api import __version__
-from folder_grant_api.api.routes import access_jobs, health, preview, project_jobs
+from folder_grant_api.api.routes import access_jobs, health, preview, project_jobs, validation
 from folder_grant_api.infrastructure.database import create_database
 from folder_grant_api.settings import Settings, get_settings
 
@@ -29,6 +29,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings or get_settings()
     app.include_router(health.router)
+    app.include_router(validation.router)
     app.include_router(preview.router)
     app.include_router(access_jobs.router)
     app.include_router(project_jobs.router)

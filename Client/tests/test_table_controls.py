@@ -94,12 +94,12 @@ class TableControlTests(unittest.TestCase):
         self.assertTrue(v.btn_preview.isEnabled())
         self.assertEqual(v.tbl.contextMenuPolicy(),self.m.Qt.CustomContextMenu)
 
-    def test_project_preview_uses_preview_endpoint_even_after_cached_success(self):
+    def test_project_validation_queries_even_after_cached_success(self):
         v = self.viewer()
         v._delete_row(2);v._delete_row(1)
         v._on_project_result(0,dict(status='succeeded',executor_mode='powershell',job_id='previous'))
         api = Mock();api.api_key='test'
-        api.request.return_value=dict(valid=True,steps=[])
+        api.request.side_effect=lambda method,path,payload: dict(request_id=payload['request_id'],validation_status='passed',checks=[dict(label='보안 그룹',target='LSK Test',status='passed',message='존재')])
         self.window._api_client = Mock(return_value=api)
         with patch.object(self.m.CreateWorker,'_bus_click_process') as bus:
             v.btn_preview.click()
@@ -109,9 +109,10 @@ class TableControlTests(unittest.TestCase):
             self.assertIsNone(v.worker_thread)
             bus.assert_not_called()
         self.assertEqual(api.request.call_count,1)
-        self.assertEqual(api.request.call_args.args[:2],('POST','/api/v1/project-jobs/preview'))
-        self.assertEqual(v.tbl.item(0,v._status_col).text(),'미리보기')
+        self.assertEqual(api.request.call_args.args[:2],('POST','/api/v1/project-jobs/validate'))
+        self.assertEqual(v.tbl.item(0,v._status_col).text(),'요청 검증 통과')
         self.assertTrue(v.btn_preview.isEnabled())
+        self.assertEqual(v.tbl.item(0,v._hidx['프로젝트코드']).data(self.m.Qt.UserRole)['result']['job_id'],'previous')
 
     def test_bus_rows_read_only_manual_and_excel_rows_stay_editable(self):
         file=os.path.join(self.fixture.tmp.name,'requests.xlsx')
