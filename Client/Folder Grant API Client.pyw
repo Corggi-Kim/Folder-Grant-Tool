@@ -2495,9 +2495,26 @@ class BusySpinner(QWidget):
     def paintEvent(self,event):
         painter = QPainter(self); painter.setRenderHint(QPainter.Antialiasing)
         pen = QPen(QColor('#dbe5f5'),3); painter.setPen(pen)
-        painter.drawEllipse(5,5,20,20)
+        painter.drawEllipse(5,5,self.width()-10,self.height()-10)
         pen.setColor(QColor('#2864ed')); pen.setCapStyle(Qt.RoundCap); painter.setPen(pen)
-        painter.drawArc(5,5,20,20,-self.angle*16,105*16)
+        painter.drawArc(5,5,self.width()-10,self.height()-10,-self.angle*16,105*16)
+
+
+class ProcessStepIcon(QLabel):
+    """A stage number/checkmark with a running animation in the same space."""
+    def __init__(self,text):
+        super().__init__(text)
+        self.spinner = BusySpinner(self)
+        self.spinner.setFixedSize(24,24)
+        self.spinner.hide()
+
+    def setProperty(self,name,value):
+        result = super().setProperty(name,value)
+        if name == 'state':
+            self.spinner.setVisible(value == 'running')
+            if value == 'running':
+                self.setText('')
+        return result
 
 
 class BusLoginDialog(QDialog):
@@ -3142,7 +3159,7 @@ class NewItemsViewer(QDialog):
         stages = QWidget(); stages.setObjectName('projectProcess'); stage_layout = QVBoxLayout(stages); stage_layout.setContentsMargins(0,0,0,0); stage_layout.setSpacing(9)
         for index,name in enumerate(self.project_step_names):
             row_layout = QHBoxLayout(); row_layout.setContentsMargins(0,0,0,0); row_layout.setSpacing(12)
-            icon = QLabel(str(index+1)); icon.setObjectName('stepIcon'); icon.setAlignment(Qt.AlignCenter); icon.setFixedSize(24,24)
+            icon = ProcessStepIcon(str(index+1)); icon.setObjectName('stepIcon'); icon.setAlignment(Qt.AlignCenter); icon.setFixedSize(24,24)
             label = QLabel(name); label.setObjectName('stepLabel'); label.setWordWrap(True)
             row_layout.addWidget(icon); row_layout.addWidget(label,1)
             stage_layout.addLayout(row_layout)
@@ -3563,6 +3580,8 @@ class NewItemsViewer(QDialog):
         meta.update(live_result=dict(result),project_action=result.get('status','running'))
         item.setData(Qt.UserRole,meta)
         self.tbl.setItem(row,self._status_col,QTableWidgetItem(self._project_result_label(result)))
+        if result.get('status') in {'submitting','validating','completion_checking'}:
+            self.tbl.setCurrentCell(row,self._hidx['프로젝트코드'])
         if self.tbl.currentRow()==row:
             self._refresh_project_detail()
 
@@ -4803,7 +4822,7 @@ class AccessManager(QMainWindow):
         self.step_icons = []; self.step_labels = []
         for index,text in enumerate(['요청 검증','그룹 권한 적용','폴더 권한 적용','BUS 완료 처리']):
             step_layout = QHBoxLayout(); step_layout.setSpacing(12)
-            icon = QLabel(str(index+1)); icon.setObjectName('stepIcon'); icon.setAlignment(Qt.AlignCenter); icon.setFixedSize(24,24)
+            icon = ProcessStepIcon(str(index+1)); icon.setObjectName('stepIcon'); icon.setAlignment(Qt.AlignCenter); icon.setFixedSize(24,24)
             label = QLabel(text); label.setObjectName('stepLabel'); label.setWordWrap(True)
             step_layout.addWidget(icon); step_layout.addWidget(label,1)
             detail.addLayout(step_layout)
@@ -5702,10 +5721,13 @@ class AccessManager(QMainWindow):
         self.current_row = row
         meta = self._row_metadata(row)
         meta.pop('show_validation',None)
+        meta['live_result'] = dict(status='validating' if dry else 'submitting')
         self._set_row_metadata(row,meta)
         self.current_seq = self.done_jobs+1
         self.current_mode = 'add' if payload['operation']=='grant' else 'remove'
         self.table.item(row,self.COL_STATUS).setText('요청 검증 중' if dry else 'API 실행중')
+        self.table.setCurrentCell(row,self.COL_PROJ)
+        self._refresh_detail()
         self._log(f"API {'요청 검증' if dry else 'Job'} 요청: {payload['request_id']}",
                   summary=f"{row+1}행 · 프로젝트 {self._get(row,self.COL_PROJ)}: {'요청 검증' if dry else '권한 작업'} 요청")
         if retry_job_id:
@@ -6213,6 +6235,7 @@ class AccessManager(QMainWindow):
             self._set_row_metadata(self.current_row,meta)
         self._set_progress_status(f"API {job.get('status','')} / {job.get('job_id','')}",
                                  self._get(self.current_row,self.COL_PROJ),self.done_jobs,self.total_jobs,running=True)
+        self._refresh_detail()
 
 
     def _on_api_result(self, result):
@@ -6384,7 +6407,8 @@ class AccessManager(QMainWindow):
         values = self._row_values(row) if valid else {}
         meta = self._row_metadata(row) if valid else {}
         result = meta.get('result') or {}
-        if '실행중' in self._get(row,self.COL_STATUS):
+        active = self._get(row,self.COL_STATUS) in {'API 실행중','요청 검증 중'}
+        if active:
             result = meta.get('live_result') or (result if result.get('status')=='running' else {})
         self.detail_project.setText(values.get('proj') or '-')
         self.detail_employee.setText(values.get('user') or '-')
@@ -6403,7 +6427,11 @@ class AccessManager(QMainWindow):
             statuses[0] = 'succeeded'
         if valid and '검증실패' in self._get(row,self.COL_STATUS):
             statuses[0] = 'failed'
-        if validation:
+        if active and self._get(row,self.COL_STATUS)=='요청 검증 중':
+            statuses[0] = 'running'
+        elif active and result.get('status')=='submitting':
+            statuses[0] = 'running'
+        if validation and not active:
             statuses[0] = 'succeeded' if validation.get('validation_status')=='passed' else 'failed' if validation.get('validation_status')=='failed' else 'queued'
         groups = [s for s in raw_steps if any(k in s.get('type','') for k in ('group','member'))]
         acls = [s for s in raw_steps if s not in groups]
@@ -6429,7 +6457,7 @@ class AccessManager(QMainWindow):
         if valid:
             raw = self._get(row,self.COL_STATUS)
             shown,tone = request_status_presentation(raw)
-            self.detail_banner_title.setText('서버 작업 진행 중' if tone=='blue' and 'BUS' not in shown else shown)
+            self.detail_banner_title.setText('요청 검증 중' if active and raw=='요청 검증 중' else '서버 작업 진행 중' if tone=='blue' and 'BUS' not in shown else shown)
             message = result.get('error_message') or result.get('error_code') or ''
             if result.get('status')=='running':
                 elapsed = self._format_elapsed()
