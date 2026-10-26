@@ -14,6 +14,32 @@ def validation(request_id='BUS-X', state='passed'):
 class ValidationTests(unittest.TestCase):
     setUp=design.DesignTests.setUp
 
+    def test_running_access_and_project_steps_animate_and_stop(self):
+        w=self.window
+        row=self.fixture.row()
+        w.table.setCurrentCell(row,w.COL_PROJ)
+        w.current_row=row
+        w.show();self.app.processEvents()
+        w.table.item(row,w.COL_STATUS).setText('요청 검증 중')
+        w._set_row_metadata(row,dict(w._row_metadata(row),live_result=dict(status='validating')))
+        w._refresh_detail()
+        self.assertEqual(w.step_icons[0].property('state'),'running')
+        self.assertTrue(w.step_icons[0].spinner.timer.isActive())
+        w.table.item(row,w.COL_STATUS).setText('API 실행중')
+        w._on_api_progress(dict(job_id='live',status='running',steps=[dict(type='add_ad_group_member',status='running')]))
+        self.assertEqual(w.step_icons[1].property('state'),'running')
+        self.assertTrue(w.step_icons[1].spinner.timer.isActive())
+        w._on_api_progress(dict(job_id='live',status='running',steps=[dict(type='add_ad_group_member',status='succeeded'),dict(type='grant_folder_acl',status='running')]))
+        self.assertFalse(w.step_icons[1].spinner.timer.isActive())
+        self.assertTrue(w.step_icons[2].spinner.timer.isActive())
+        v=self.m.NewItemsViewer(w);v.show();self.app.processEvents()
+        v._refresh_project_process(dict(project_action='running'),dict(job_id='p',steps=[dict(type='ensure_project_folder',status='running')]))
+        self.assertEqual(v.project_step_icons[2].property('state'),'running')
+        self.assertTrue(v.project_step_icons[2].spinner.timer.isActive())
+        v._refresh_project_process({},dict(job_id='p',steps=[dict(type='ensure_project_folder',status='succeeded')]))
+        self.assertFalse(v.project_step_icons[2].spinner.timer.isActive())
+        v.close()
+
     def test_live_worker_never_registers_or_uses_preview_or_recovers_by_request(self):
         api=Mock();api.request.return_value=validation()
         worker=self.m.ApiJobWorker(api,'access',dict(request_id='BUS-X'),True,retry_job_id='old',validate_only=True)
@@ -35,10 +61,11 @@ class ValidationTests(unittest.TestCase):
         w=self.window
         row=self.fixture.row(result=dict(job_id='old',status='partially_succeeded',executor_mode='powershell'))
         before=w._row_metadata(row)
-        w.table.setCurrentCell(row,w.COL_PROJ)
+        w.table.setCurrentCell(-1,-1)
         api=Mock();api.api_key='key';api.request.return_value=validation(before['request_id'],'failed')
         w._api_client=Mock(return_value=api)
         w.btn_preview.click();self.fixture.wait_for_api()
+        self.assertEqual(w.table.currentRow(),row)
         meta=w._row_metadata(row)
         self.assertEqual(meta['result'],before['result'])
         self.assertEqual(meta['request_id'],before['request_id'])
