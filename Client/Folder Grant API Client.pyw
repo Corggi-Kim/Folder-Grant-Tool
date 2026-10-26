@@ -3165,7 +3165,6 @@ class NewItemsViewer(QDialog):
             stage_layout.addLayout(row_layout)
             self.project_step_icons.append(icon); self.project_step_labels.append(label)
         body_layout.addWidget(stages)
-        extra_title = QLabel('서버 작업 상세'); extra_title.setObjectName('sectionTitle'); body_layout.addWidget(extra_title)
         self.server_detail_form = QFormLayout(); self.server_detail_form.setContentsMargins(0,0,0,0); self.server_detail_form.setVerticalSpacing(9)
         self.server_detail_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.server_detail_form.setRowWrapPolicy(QFormLayout.WrapLongRows)
@@ -3433,6 +3432,11 @@ class NewItemsViewer(QDialog):
         self._refresh_selection()
 
     def _configure_project_summary(self):
+        if not any(self._project_field_kind(name)=='path' for name in self._hidx):
+            column = self.tbl.columnCount()
+            self.tbl.setColumnCount(column+1)
+            self.tbl.setHorizontalHeaderItem(column,QTableWidgetItem('경로'))
+            self._hidx['경로'] = column
         self._status_col = self.tbl.columnCount()
         self.tbl.setColumnCount(self._status_col+1)
         self.tbl.setHorizontalHeaderItem(self._status_col,QTableWidgetItem('상태'))
@@ -3451,9 +3455,39 @@ class NewItemsViewer(QDialog):
         summary = {self._hidx.get('프로젝트코드'),
                    self._hidx.get('프로젝트명',self._hidx.get('과제명',self._hidx.get('제목')))}
         for column in range(1,self._status_col):
-            self.tbl.setColumnHidden(column,not visible and column not in summary)
+            name = self.tbl.horizontalHeaderItem(column).text()
+            allowed = self._project_field_kind(name) is not None
+            self.tbl.setColumnHidden(column,not allowed or (not visible and column not in summary))
             self.tbl.horizontalHeader().setSectionResizeMode(
                 column,QHeaderView.ResizeToContents if visible else QHeaderView.Stretch)
+
+    @staticmethod
+    def _project_field_kind(name):
+        key = re.sub(r'[\s_/-]+','',str(name)).lower()
+        if key in {'프로젝트코드','과제코드','projectcode'}: return 'code'
+        if key in {'프로젝트명','과제명','제목','projectname'}: return 'name'
+        if key in {'경로','폴더경로','프로젝트경로','프로젝트폴더경로','path','folderpath','projectpath'}: return 'path'
+        suffixes = {'','정보','사번','성명','이름','부서','팀','부서팀','직책','직급','이메일','연락처','id','name'}
+        if key in {'사번','성명','이름','부서','팀','부서팀','직책','직급','이메일','연락처'}: return 'requester'
+        for prefix in ('요청자','신청자','등록자','requester'):
+            if key.startswith(prefix) and key[len(prefix):] in suffixes: return 'requester'
+        return None
+
+    def _update_project_path(self,row,result):
+        path = next((step.get('target') for step in (result.get('steps') or [])
+                     if step.get('type')=='ensure_project_folder' and step.get('target')),None)
+        if path:
+            for name,column in self._hidx.items():
+                if self._project_field_kind(name)=='path':
+                    current = self.tbl.item(row,column)
+                    if current and current.text()==str(path):
+                        continue
+                    item = QTableWidgetItem(str(path)); item.setTextAlignment(Qt.AlignCenter)
+                    blocked = self.tbl.blockSignals(True)
+                    try:
+                        self.tbl.setItem(row,column,item)
+                    finally:
+                        self.tbl.blockSignals(blocked)
 
     @staticmethod
     def _project_result_label(result):
@@ -3522,7 +3556,7 @@ class NewItemsViewer(QDialog):
         self._detail_generation += 1; generation = self._detail_generation
         def add_field(form,name,text):
             text = str(text) if text is not None and str(text) else '-'
-            if form is self.server_detail_form:
+            if form is self.server_detail_form or name=='경로':
                 value = DetailTextValue(text)
             else:
                 value = QLabel(text)
@@ -3531,28 +3565,20 @@ class NewItemsViewer(QDialog):
                 value.setTextInteractionFlags(Qt.TextSelectableByMouse)
             label = QLabel(name); label.setObjectName('mutedLabel'); label.setWordWrap(True)
             form.addRow(label,value); self.detail_values[name] = value
-        for name,column in getattr(self,'_hidx',{}).items():
-            item = self.tbl.item(row,column) if row>=0 else None
-            if row>=0:
-                add_field(self.detail_form,name,item.text() if item else '-')
         job = meta.get('live_result') if meta.get('project_action') else meta.get('result') or {}
         job = job or {}
         self._refresh_project_process(meta,job)
         steps = {step.get('type'):step for step in (job.get('steps') or []) if isinstance(step,dict)}
-        extra = [('원본 요청번호',meta.get('request_id')),('작업 ID',job.get('job_id')),
-                 ('보안 그룹',steps.get('ensure_ad_group',{}).get('target')),
-                 ('프로젝트 경로',steps.get('ensure_project_folder',{}).get('target')),
-                 ('템플릿',steps.get('ensure_project_folder',{}).get('details',{}).get('template_path')),
-                 ('서버 상태',self._project_result_label(dict(status=job['status'])) if job.get('status') else None),('시작 시각',job.get('started_at')),('완료 시각',job.get('finished_at'))]
-        for name,value in extra:
-            if value:
-                if name in {'시작 시각','완료 시각'}:
-                    try:
-                        when = datetime.datetime.fromisoformat(str(value).replace('Z','+00:00'))
-                        if when.tzinfo is None: when = when.replace(tzinfo=datetime.timezone.utc)
-                        value = when.astimezone().strftime('%Y-%m-%d %H:%M:%S')
-                    except (ValueError,TypeError): pass
-                add_field(self.server_detail_form,name,value)
+        if row>=0:
+            self._update_project_path(row,job)
+            fields = list(getattr(self,'_hidx',{}).items())
+            for kind,label in [('code','프로젝트코드'),('name','프로젝트명'),('path','경로'),('requester','요청자')]:
+                matched = [(name,column) for name,column in fields if self._project_field_kind(name)==kind]
+                if not matched:
+                    add_field(self.detail_form,label,'-')
+                for name,column in matched:
+                    item = self.tbl.item(row,column)
+                    add_field(self.detail_form,label if kind!='requester' else name,item.text() if item else '-')
         result = (meta.get('validation_result') or {}) if meta.get('show_validation') else job
         if row<0:
             self.detail_result.setText('요청을 선택하세요')
@@ -3582,6 +3608,7 @@ class NewItemsViewer(QDialog):
             return
         meta = dict(item.data(Qt.UserRole) or {})
         meta.pop('show_validation',None); meta.pop('completion_check_error',None)
+        self._update_project_path(row,result)
         meta.update(live_result=dict(result),project_action=result.get('status','running'))
         item.setData(Qt.UserRole,meta)
         self.tbl.setItem(row,self._status_col,QTableWidgetItem(self._project_result_label(result)))
@@ -3687,6 +3714,7 @@ class NewItemsViewer(QDialog):
 
 
     def _on_project_result(self,row,result):
+        self._update_project_path(row,result)
         verified = result.get('executor_mode') in {'mock','powershell'} or result.get('status')=='preview'
         self.host._set_api_connection_state(verified,result)
         col = self._hidx.get('프로젝트코드',-1)
