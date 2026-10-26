@@ -3228,6 +3228,7 @@ class NewItemsViewer(QDialog):
 
     def _on_worker_finished(self,ok_cnt,fail_cnt):
         prefix = '요청 검증 완료' if getattr(self,'_validation_running',False) else f'실제 성공 {ok_cnt} / 실패 {fail_cnt}'
+        self.status_lbl.setText(prefix+' - '+self._last_worker_msg)
 
 
     def _manual_add(self,proj,name):
