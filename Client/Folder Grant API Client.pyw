@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem, QAbstractItemView, QVBoxLayout, QWidget, QTextEdit, QHBoxLayout,
     QLabel, QHeaderView, QCheckBox, QMenu, QToolButton, QMessageBox, QStyleOptionButton,
     QStyle, QDialog, QLineEdit, QComboBox, QDialogButtonBox, QFormLayout, QStatusBar,
-    QTabWidget, QScrollArea, QSpinBox, QProgressBar, QAbstractButton, QTabBar, QStackedWidget, QAction, QStyledItemDelegate, QStyleOptionViewItem, QStyleOptionTab
+    QTabWidget, QScrollArea, QSizePolicy, QSpinBox, QProgressBar, QAbstractButton, QTabBar, QStackedWidget, QAction, QStyledItemDelegate, QStyleOptionViewItem, QStyleOptionTab
 )
 from PyQt5.QtGui import QFont, QGuiApplication, QKeySequence, QPainter, QTextOption, QTextCursor, QPixmap, QIcon, QColor, QPen, QPainterPath
 from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QTimer, QPoint, QSize
@@ -3049,6 +3049,37 @@ class ManualNewRequestDialog(QDialog):
         return self.edt_proj.text().strip(), self.edt_name.text().strip()
 
 
+class DetailTextValue(QTextEdit):
+    """Wrap long IDs/UNC paths without changing the text users copy."""
+    def __init__(self, text):
+        super().__init__()
+        self.setReadOnly(True); self.setFrameShape(QTextEdit.NoFrame)
+        self.setStyleSheet('background:transparent;border:0;padding:0;')
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        self.document().setDocumentMargin(0)
+        self.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed)
+        self.setMinimumWidth(0); self.setPlainText(text)
+        QTimer.singleShot(0,self._fit_text)
+
+    def text(self):
+        return self.toPlainText()
+
+    def sizeHint(self):
+        return QSize(90,self.height())
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        self._fit_text()
+
+    def _fit_text(self):
+        self.document().setTextWidth(max(1,self.viewport().width()))
+        height = max(self.fontMetrics().height()+2,int(self.document().size().height()+2))
+        if self.height()!=height:
+            self.setFixedHeight(height)
+
+
 class NewItemsViewer(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -3094,14 +3125,47 @@ class NewItemsViewer(QDialog):
         fields = QWidget(); fields.setObjectName('projectDetailFields')
         self.detail_form = QFormLayout(fields); self.detail_form.setVerticalSpacing(9)
         self.detail_form.setContentsMargins(0,0,0,0)
+        self.detail_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self.detail_form.setRowWrapPolicy(QFormLayout.WrapLongRows)
         self.detail_scroll = QScrollArea(); self.detail_scroll.setObjectName('projectDetailScroll'); self.detail_scroll.setWidgetResizable(True)
         self.detail_scroll.setFrameShape(QScrollArea.NoFrame)
-        self.detail_scroll.setWidget(fields)
+        body = QWidget(); body.setObjectName('projectDetailBody'); body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0,0,0,0); body_layout.setSpacing(12)
+        body_layout.addWidget(fields)
+        process_title = QLabel('처리 진행'); process_title.setObjectName('sectionTitle')
+        body_layout.addWidget(process_title)
+        self.project_step_icons = []; self.project_step_labels = []
+        self.project_step_types = ['request','ensure_ad_group','ensure_project_folder','cleanup_unknown_acl',
+                                   'grant_project_root_acl','grant_study_all_acl','verify_project_creation','bus']
+        self.project_step_names = ['요청 확인','보안 그룹 준비','프로젝트 폴더 준비','기본 ACL 정리',
+                                   '프로젝트 권한 적용','기본 폴더 권한 적용','생성 결과 확인','BUS 완료 처리']
+        stages = QWidget(); stages.setObjectName('projectProcess'); stage_layout = QVBoxLayout(stages); stage_layout.setContentsMargins(0,0,0,0); stage_layout.setSpacing(9)
+        for index,name in enumerate(self.project_step_names):
+            row_layout = QHBoxLayout(); row_layout.setContentsMargins(0,0,0,0); row_layout.setSpacing(12)
+            icon = QLabel(str(index+1)); icon.setObjectName('stepIcon'); icon.setAlignment(Qt.AlignCenter); icon.setFixedSize(24,24)
+            label = QLabel(name); label.setObjectName('stepLabel'); label.setWordWrap(True)
+            row_layout.addWidget(icon); row_layout.addWidget(label,1)
+            stage_layout.addLayout(row_layout)
+            self.project_step_icons.append(icon); self.project_step_labels.append(label)
+        body_layout.addWidget(stages)
+        extra_title = QLabel('서버 작업 상세'); extra_title.setObjectName('sectionTitle'); body_layout.addWidget(extra_title)
+        self.server_detail_form = QFormLayout(); self.server_detail_form.setContentsMargins(0,0,0,0); self.server_detail_form.setVerticalSpacing(9)
+        self.server_detail_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self.server_detail_form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        body_layout.addLayout(self.server_detail_form); body_layout.addStretch()
+        self.detail_scroll.setWidget(body)
+        self._detail_generation = 0; self._detail_token = None
         detail.addWidget(self.detail_scroll,1)
         self.detail_result = QLabel('요청을 선택하세요')
         self.detail_result.setObjectName('detailBanner'); self.detail_result.setWordWrap(True)
         self.detail_result.setContentsMargins(12,10,12,10)
-        detail.addWidget(self.detail_result)
+        self.detail_result.setTextFormat(Qt.PlainText)
+        self.detail_result_scroll = QScrollArea(); self.detail_result_scroll.setObjectName('projectResultScroll'); self.detail_result_scroll.setWidgetResizable(True)
+        self.detail_result_scroll.setFrameShape(QScrollArea.NoFrame)
+        self.detail_result_scroll.setMinimumHeight(90); self.detail_result_scroll.setMaximumHeight(120)
+        self.detail_result.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
+        self.detail_result_scroll.setWidget(self.detail_result)
+        detail.addWidget(self.detail_result_scroll)
         self.detail_values = {}
         content.addWidget(self.detail_panel)
         lay.addLayout(content,1)
@@ -3219,7 +3283,6 @@ class NewItemsViewer(QDialog):
     def _on_worker_progress(self, cur: int, total: int, message: str):
         self.status_lbl.setText(message)
         self._last_worker_msg = message
-        self.detail_result.setText(message)
         self.host._set_progress_status(message,done=cur,total=total,running=True)
 
     def _on_worker_finished(self,ok_cnt,fail_cnt):
@@ -3374,41 +3437,134 @@ class NewItemsViewer(QDialog):
     def _project_result_label(result):
         if result.get('bus_done'):
             return 'BUS 완료'
+        if result.get('bus_processing'):
+            return 'BUS 완료 처리 중'
         if result.get('completion_check_failed'):
             return 'BUS 완료 확인 불가'
         if result.get('completion_only'):
             return 'BUS 완료 보류'
-        return {'preview':'요청 검증','succeeded':'서버 성공','failed':'실패',
+        return {'submitting':'요청 접수 중','validating':'요청 검증 중','completion_checking':'서버 재조회 중',
+                'partially_succeeded':'부분 성공','simulated':'모의 실행 완료','preview':'실행 계획','succeeded':'서버 성공','failed':'실패',
                 'cancelled':'중지됨','running':'실행 중','queued':'실행 대기'}.get(result.get('status'),'실행 대기')
 
+    def _refresh_project_process(self, meta, job):
+        steps = {step.get('type'):step for step in (job.get('steps') or []) if isinstance(step,dict)}
+        states = ['queued']*8
+        names = list(self.project_step_names)
+        if job.get('job_id'):
+            states[0] = 'succeeded'
+        action = meta.get('project_action')
+        if action in {'validating','submitting'}:
+            states[0] = 'running'
+        validation = meta.get('validation_result') if meta.get('show_validation') else None
+        if validation:
+            names[0] = '요청 검증'
+            states[0] = {'passed':'succeeded','failed':'failed','warning':'warning','unknown':'warning'}.get(validation.get('validation_status'),'queued')
+        if action == 'validating':
+            names[0] = '요청 검증'
+        for index,kind in enumerate(self.project_step_types[1:-1],1):
+            step = steps.get(kind,{})
+            state = step.get('status','queued')
+            if job.get('executor_mode')=='mock' and state in {'succeeded','simulated'}:
+                state = 'simulated'; names[index] += ' · 모의 실행'
+            states[index] = state if state in {'succeeded','running','failed','cancelled','skipped','simulated'} else 'queued'
+        if meta.get('bus_done') and meta.get('source')=='bus':
+            states[-1] = 'succeeded'
+        elif meta and meta.get('source')!='bus':
+            states[-1] = 'not_applicable'; names[-1] += ' · 수동 요청 제외'
+        elif action == 'completion_checking' or job.get('bus_processing'):
+            states[-1] = 'running'
+        elif meta.get('completion_check_error') or (job.get('bus_completion_attempted') and not job.get('bus_done')):
+            states[-1] = 'failed'
+        for index,(icon,label,state) in enumerate(zip(self.project_step_icons,self.project_step_labels,states)):
+            icon.setText('✓' if state=='succeeded' else '-' if state in {'skipped','cancelled','simulated','not_applicable'} else str(index+1))
+            suffix = ' · 미실행' if state=='skipped' else ' · 중지됨' if state=='cancelled' else ''
+            label.setText(names[index]+suffix)
+            for widget in (icon,label):
+                widget.setProperty('state',state)
+                widget.style().unpolish(widget); widget.style().polish(widget)
+
     def _refresh_project_detail(self):
-        while self.detail_form.rowCount():
-            self.detail_form.removeRow(0)
+        saved_scroll = self.detail_scroll.verticalScrollBar().value()
+        for form in (self.detail_form,self.server_detail_form):
+            while form.rowCount():
+                form.removeRow(0)
         self.detail_values = {}
         row = self.tbl.currentRow()
-        if row < 0:
-            self.detail_result.setText('요청을 선택하세요')
-            return
-        for name,column in getattr(self,'_hidx',{}).items():
-            item = self.tbl.item(row,column)
-            value = QLabel(item.text() if item and item.text() else '-')
-            value.setWordWrap(True); value.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            label = QLabel(name); label.setObjectName('mutedLabel'); label.setWordWrap(True)
-            self.detail_form.addRow(label,value)
-            self.detail_values[name] = value
-        code_item = self.tbl.item(row,self._hidx.get('프로젝트코드',-1))
+        code_item = self.tbl.item(row,getattr(self,'_hidx',{}).get('프로젝트코드',-1)) if row>=0 else None
         meta = dict(code_item.data(Qt.UserRole) or {}) if code_item else {}
-        if meta.get('completion_check_error'):
+        token = meta.get('request_id') or (code_item.text() if code_item else None)
+        if token != self._detail_token:
+            saved_scroll = 0
+        self._detail_token = token
+        self._detail_generation += 1; generation = self._detail_generation
+        def add_field(form,name,text):
+            text = str(text) if text is not None and str(text) else '-'
+            if form is self.server_detail_form:
+                value = DetailTextValue(text)
+            else:
+                value = QLabel(text)
+                value.setWordWrap(True); value.setTextFormat(Qt.PlainText)
+                value.setMinimumWidth(0); value.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
+                value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            label = QLabel(name); label.setObjectName('mutedLabel'); label.setWordWrap(True)
+            form.addRow(label,value); self.detail_values[name] = value
+        for name,column in getattr(self,'_hidx',{}).items():
+            item = self.tbl.item(row,column) if row>=0 else None
+            if row>=0:
+                add_field(self.detail_form,name,item.text() if item else '-')
+        job = meta.get('live_result') if meta.get('project_action') else meta.get('result') or {}
+        job = job or {}
+        self._refresh_project_process(meta,job)
+        steps = {step.get('type'):step for step in (job.get('steps') or []) if isinstance(step,dict)}
+        extra = [('원본 요청번호',meta.get('request_id')),('작업 ID',job.get('job_id')),
+                 ('보안 그룹',steps.get('ensure_ad_group',{}).get('target')),
+                 ('프로젝트 경로',steps.get('ensure_project_folder',{}).get('target')),
+                 ('템플릿',steps.get('ensure_project_folder',{}).get('details',{}).get('template_path')),
+                 ('서버 상태',self._project_result_label(dict(status=job['status'])) if job.get('status') else None),('시작 시각',job.get('started_at')),('완료 시각',job.get('finished_at'))]
+        for name,value in extra:
+            if value:
+                if name in {'시작 시각','완료 시각'}:
+                    try:
+                        when = datetime.datetime.fromisoformat(str(value).replace('Z','+00:00'))
+                        if when.tzinfo is None: when = when.replace(tzinfo=datetime.timezone.utc)
+                        value = when.astimezone().strftime('%Y-%m-%d %H:%M:%S')
+                    except (ValueError,TypeError): pass
+                add_field(self.server_detail_form,name,value)
+        result = (meta.get('validation_result') or {}) if meta.get('show_validation') else job
+        if row<0:
+            self.detail_result.setText('요청을 선택하세요')
+        elif meta.get('completion_check_error'):
             self.detail_result.setText('BUS 완료 확인 불가\n'+meta['completion_check_error'])
+        else:
+            title = ('요청 검증 중' if meta.get('project_action')=='validating' else
+                     '서버 결과 재조회 중' if meta.get('project_action')=='completion_checking' else
+                     validation_label(result) if result.get('status')=='validated' else self._project_result_label(result))
+            lines = [title]
+            running = next((step for step in steps.values() if step.get('status')=='running'),None)
+            if running:
+                lines.append('현재 단계: '+str(running.get('description') or running.get('type')))
+            for key,label in [('error_code','오류'),('error_message','상세'),('message','메시지')]:
+                if result.get(key): lines.append(f'{label}: {result[key]}')
+            if result.get('status')=='validated':
+                lines.append('검증 결과는 작업 로그에서 확인하세요. 권한은 변경하지 않았습니다.')
+            self.detail_result.setText('\n'.join(lines))
+        def restore_scroll():
+            if generation==self._detail_generation:
+                self.detail_scroll.verticalScrollBar().setValue(saved_scroll)
+        QTimer.singleShot(0,restore_scroll)
+
+    def _on_project_progress(self,row,result):
+        item = self.tbl.item(row,self._hidx.get('프로젝트코드',-1))
+        if not item:
             return
-        result = meta.get('validation_result') if meta.get('show_validation') else meta.get('result') or {}
-        lines = [validation_label(result) if result.get('status')=='validated' else self._project_result_label(result)]
-        for key,label in [('job_id','작업 ID'),('error_code','오류'),('message','메시지')]:
-            if result.get(key):
-                lines.append(f'{label}: {result[key]}')
-        if result.get('status')=='validated':
-            lines.append('각 항목의 실제 조회 결과는 아래 작업 로그에서 확인하세요.')
-        self.detail_result.setText('\n'.join(lines))
+        meta = dict(item.data(Qt.UserRole) or {})
+        meta.pop('show_validation',None); meta.pop('completion_check_error',None)
+        meta.update(live_result=dict(result),project_action=result.get('status','running'))
+        item.setData(Qt.UserRole,meta)
+        self.tbl.setItem(row,self._status_col,QTableWidgetItem(self._project_result_label(result)))
+        if self.tbl.currentRow()==row:
+            self._refresh_project_detail()
 
     def _toggle_all_rows(self, checked: bool):
         t = self.tbl
@@ -3492,6 +3648,7 @@ class NewItemsViewer(QDialog):
         self.worker_thread.started.connect(self.worker.run)
         self.worker.progress.connect(self._on_worker_progress)
         self.worker.itemResult.connect(self._on_project_result)
+        self.worker.itemProgress.connect(self._on_project_progress)
         self.worker.finished.connect(self._on_worker_finished)
         self.worker.finished.connect(self.worker.deleteLater)
         self.worker.finished.connect(self.worker_thread.quit,type=Qt.DirectConnection)
@@ -3513,6 +3670,7 @@ class NewItemsViewer(QDialog):
         if item:
             meta = dict(item.data(Qt.UserRole) or {})
             meta.pop('completion_check_error',None)
+            meta.pop('project_action',None); meta.pop('live_result',None)
             if result.get('completion_check_failed'):
                 meta.pop('show_validation',None)
                 meta['completion_check_error'] = result.get('error_message','서버 결과 확인 불가')
@@ -3534,6 +3692,14 @@ class NewItemsViewer(QDialog):
 
 
     def _project_thread_finished(self):
+        for row in range(self.tbl.rowCount()):
+            item = self.tbl.item(row,self._hidx.get('프로젝트코드',-1))
+            meta = dict(item.data(Qt.UserRole) or {}) if item else {}
+            if meta.pop('project_action',None):
+                meta.pop('live_result',None)
+                item.setData(Qt.UserRole,meta)
+                self.tbl.setItem(row,self._status_col,QTableWidgetItem(self._project_result_label(meta.get('result') or {})))
+        self._refresh_project_detail()
         self.worker = None
         self.worker_thread = None
         self._set_busy(False,self.status_lbl.text())
@@ -3559,6 +3725,7 @@ class NewItemsViewer(QDialog):
 
 
 class CreateWorker(QObject):
+    itemProgress = pyqtSignal(int,dict)
     itemResult = pyqtSignal(int,dict)
     progress = pyqtSignal(int, int, str)
     finished = pyqtSignal(int, int)
@@ -3950,6 +4117,7 @@ class CreateWorker(QObject):
                 if item.get('source')!='bus' or item.get('bus_done') or not request_id:
                     continue
                 self.progress.emit(index,len(self.items),f"{item['proj']} 서버 결과 재조회")
+                self.itemProgress.emit(item.get('row',index),dict(status='completion_checking'))
                 try:
                     result = self.client.request('GET','/api/v1/project-jobs/by-request/'+quote(request_id,safe=''))
                     if (result.get('request_id')!=request_id or not result.get('job_id')
@@ -3963,7 +4131,9 @@ class CreateWorker(QObject):
                         if not self.creds.get('id') or not self.creds.get('pw'):
                             message = 'BUS 계정 누락: 계정 설정 후 완료만 다시 시도하세요.'
                         else:
+                            self.itemProgress.emit(item.get('row',index),dict(result,bus_processing=True))
                             ok,message = self._bus_click_process(item['proj'])
+                            result['bus_completion_attempted'] = True
                             result['bus_done'] = bool(ok)
                     else:
                         message = '서버 실제 성공이 확인되지 않아 BUS 완료를 보류했습니다.'
@@ -3996,6 +4166,7 @@ class CreateWorker(QObject):
                 if self._stop:
                     break
                 self.progress.emit(index,len(self.items),f"{item['proj']} API 작업 중")
+                self.itemProgress.emit(item.get('row',index),dict(status='validating' if self.validate_only else 'submitting'))
                 source = item.get('source','test-client')
                 request_id = item.get('request_id') or new_client_request_id()
                 payload = make_project_payload(item['proj'],item.get('name',''),request_id,source,self.requested_by)
@@ -4004,6 +4175,7 @@ class CreateWorker(QObject):
                     result = dict(cached)
                 else:
                     self._active_job = ApiJobWorker(self.client,'project',payload,self.dry_run,validate_only=self.validate_only)
+                    self._active_job.progress.connect(lambda result,row=item.get('row',index):self.itemProgress.emit(row,result))
                     if self._stop:
                         self._active_job.stop()
                     try:
@@ -4025,7 +4197,9 @@ class CreateWorker(QObject):
                         result['bus_done'] = False
                         message += ' / BUS 계정 누락: 완료만 재시도 가능'
                     else:
+                        self.itemProgress.emit(item.get('row',index),dict(result,bus_processing=True))
                         bus_ok,bus_message = self._bus_click_process(item['proj'])
+                        result['bus_completion_attempted'] = True
                         result['bus_done'] = bus_ok
                         message += ' / BUS '+bus_message
                 self.itemResult.emit(item.get('row',index),result)
@@ -4330,7 +4504,7 @@ class AccessManager(QMainWindow):
         QTabBar::tab:selected {{color:{t['accent']};border-bottom-color:{t['accent']};}}
         QTabBar::tab:disabled {{color:{t['disabled']};}}
         QWidget#requestToolbar {{background:{t['bg']};border:0;}}
-        QWidget#projectDetailFields, QScrollArea#projectDetailScroll {{background:{t['panel']};}}
+        QWidget#projectDetailFields, QWidget#projectDetailBody, QWidget#projectProcess, QScrollArea#projectDetailScroll, QScrollArea#projectResultScroll {{background:{t['panel']};}}
         QWidget#projectDetailFields QLabel {{background:transparent;}}
         QLabel#requestCountBadge {{background:#ef3340;color:white;border:0;border-radius:5px;padding:0;font-size:11px;font-weight:600;}}
         QLabel#sectionTitle {{font-size:16px;font-weight:700;}}
@@ -4347,6 +4521,8 @@ class AccessManager(QMainWindow):
         QLabel#stepIcon[state="failed"] {{background:{t['red']};color:#ffffff;}}
         QLabel#stepLabel[state="running"] {{color:{t['accent']};font-weight:600;}}
         QLabel#stepLabel[state="failed"] {{color:{t['red']};}}
+        QLabel#stepIcon[state="warning"] {{background:{t['amber']};color:#ffffff;}}
+        QLabel#stepLabel[state="warning"] {{color:{t['amber']};}}
         QWidget#detailBanner {{background:{t['blue_bg']};border-radius:5px;}}
         QLabel#bannerTitle {{color:{t['accent']};font-weight:600;font-size:12px;}}
         QTextEdit#bannerBody {{background:{t['blue_bg']};color:{t['muted']};font-size:11px;border:0;padding:0;}}
