@@ -4552,6 +4552,7 @@ class AccessManager(QMainWindow):
         QLineEdit,QComboBox,QSpinBox {{background:{t['panel']};border:1px solid {t['button_border']};border-radius:4px;padding:5px;selection-background-color:{t['select']};}}
         QMenu {{background:{t['panel']};border:1px solid {t['border']};padding:5px;}}
         QMenu::item {{padding:7px 18px;border-radius:3px;}}
+        QMenu#settingsMenu::indicator {{width:0px;height:0px;}}
         QMenu::item:selected {{background:{t['select']};}}
         QMenu::item:disabled {{color:{t['disabled']};background:transparent;}}
         QMenu::separator {{height:1px;background:{t['border']};margin:5px;}}
@@ -4708,13 +4709,14 @@ class AccessManager(QMainWindow):
         self.settings_button = QToolButton(); self.settings_button.setObjectName('utilityButton')
         self.settings_button.setText('⚙'); self.settings_button.setToolTip('설정 및 도움말')
         self.settings_button.setPopupMode(QToolButton.InstantPopup)
-        menu = QMenu(self.settings_button)
+        menu = QMenu(self.settings_button); menu.setObjectName('settingsMenu')
         self.btn_api_settings = menu.addAction('API 연결 설정',self._open_api_settings)
         self.btn_settings = menu.addAction('BUS 계정 설정',self._open_settings)
         menu.addSeparator()
         self.columns_action = menu.addAction('상세 열 표시 (이름 · 부서 · Role)')
         self.columns_action.setCheckable(True)
         self.columns_action.toggled.connect(self._toggle_detail_columns)
+        self.columns_action.toggled.connect(lambda checked: self.columns_action.setText('상세 열 표시 (이름 · 부서 · Role)' + ('  ✓' if checked else '')))
         menu.addAction('도움말',self._show_help)
         # menu.addAction('BUS 요청 알림',self._open_notif_popup)
         self.settings_button.setMenu(menu)
