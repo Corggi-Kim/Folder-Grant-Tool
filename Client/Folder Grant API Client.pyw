@@ -3389,7 +3389,7 @@ class NewItemsViewer(QDialog):
             return
         for name,column in getattr(self,'_hidx',{}).items():
             item = self.tbl.item(row,column)
-            value = QLabel(item.text() if item and item.text() else '—')
+            value = QLabel(item.text() if item and item.text() else '-')
             value.setWordWrap(True); value.setTextInteractionFlags(Qt.TextSelectableByMouse)
             label = QLabel(name); label.setObjectName('mutedLabel'); label.setWordWrap(True)
             self.detail_form.addRow(label,value)
@@ -4090,7 +4090,7 @@ class RequestDelegate(FocuslessItemDelegate):
         if index.column() == host.COL_LV2 and host.table.isColumnHidden(host.COL_LV3):
             lv2 = host._get(index.row(),host.COL_LV2)
             lv3 = host._get(index.row(),host.COL_LV3)
-            opt.text = f'{lv2} · {lv3}' if lv2 and lv3 else '—'
+            opt.text = f'{lv2} · {lv3}' if lv2 and lv3 else '-'
             host.table.style().drawControl(QStyle.CE_ItemViewItem,opt,painter,host.table)
             return
         if index.column() != host.COL_STATUS:
@@ -4470,7 +4470,7 @@ class AccessManager(QMainWindow):
         connection.setContentsMargins(24,10,24,10); connection.setSpacing(18)
         self.api_status_label = QLabel('○  API 미확인')
         self.bus_status_label = QLabel('○  BUS 미연결')
-        self.server_label = QLabel('—'); self.server_label.setObjectName('mutedLabel')
+        self.server_label = QLabel('-'); self.server_label.setObjectName('mutedLabel')
         for widget in (self.api_status_label,self.bus_status_label,self.server_label):
             connection.addWidget(widget)
         connection.addStretch()
@@ -4548,10 +4548,10 @@ class AccessManager(QMainWindow):
         detail = QVBoxLayout(self.detail_panel); detail.setContentsMargins(17,14,17,14); detail.setSpacing(12)
         detail_title = QLabel('선택 요청 상세'); detail_title.setObjectName('sectionTitle'); detail.addWidget(detail_title)
         form = QFormLayout(); form.setHorizontalSpacing(12); form.setVerticalSpacing(9)
-        self.detail_project = QLabel('—'); self.detail_employee = QLabel('—')
+        self.detail_project = QLabel('-'); self.detail_employee = QLabel('-')
         self.detail_access = QLabel('요청을 선택하세요'); self.detail_access.setWordWrap(True)
-        self.detail_role = QLabel('—'); self.detail_role.setWordWrap(True)
-        self.detail_name = QLabel('—'); self.detail_department = QLabel('—')
+        self.detail_role = QLabel('-'); self.detail_role.setWordWrap(True)
+        self.detail_name = QLabel('-'); self.detail_department = QLabel('-')
         for text,widget in [('프로젝트',self.detail_project),('대상 사번',self.detail_employee),
                             ('권한',self.detail_access),('Role',self.detail_role)]:
             label = QLabel(text); label.setObjectName('mutedLabel'); form.addRow(label,widget)
@@ -5536,7 +5536,7 @@ class AccessManager(QMainWindow):
         self.log_toggle.setChecked(True)
         self._log(json.dumps(result,ensure_ascii=False,indent=2),
                   summary=f'{context}: {validation_label(result)}')
-        symbols = {'passed':'✓','failed':'✕','unknown':'?','warning':'!','not_applicable':'—'}
+        symbols = {'passed':'✓','failed':'✕','unknown':'?','warning':'!','not_applicable':'-'}
         for check in result.get('checks',[]):
             target = f" · {check['target']}" if check.get('target') else ''
             self._log(f"{symbols.get(check.get('status'),'?')} {check.get('label','검사')}{target}: {check.get('message','')}")
@@ -6132,12 +6132,12 @@ class AccessManager(QMainWindow):
         result = meta.get('result') or {}
         if '실행중' in self._get(row,self.COL_STATUS):
             result = meta.get('live_result') or (result if result.get('status')=='running' else {})
-        self.detail_project.setText(values.get('proj') or '—')
-        self.detail_employee.setText(values.get('user') or '—')
+        self.detail_project.setText(values.get('proj') or '-')
+        self.detail_employee.setText(values.get('user') or '-')
         access = values.get('req','')
         folder = ' / '.join(x for x in (values.get('lv2'),values.get('lv3')) if x)
         self.detail_access.setText(f'{access} · {folder}' if folder else access or '요청을 선택하세요')
-        self.detail_role.setText(values.get('role') or '—')
+        self.detail_role.setText(values.get('role') or '-')
         self.detail_name.setText(self._get(row,self.COL_NAME) if valid else '')
         self.detail_department.setText(self._get(row,self.COL_DEPT) if valid else '')
         extra = ' · '.join(x for x in (self.detail_name.text(),self.detail_department.text()) if x)
@@ -6204,7 +6204,7 @@ class AccessManager(QMainWindow):
         self.bus_status_label.setText('●  BUS 로그인됨' if bus_ok else '○  BUS 미연결')
         self.bus_status_label.setStyleSheet(f"color:{t['green'] if bus_ok else t['muted']};")
         parsed = urlsplit(getattr(self,'api_config',{}).get('base_url',DEFAULT_API_URL))
-        self.server_label.setText(parsed.netloc or '—')
+        self.server_label.setText(parsed.netloc or '-')
 
 
 
