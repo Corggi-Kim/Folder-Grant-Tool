@@ -3436,12 +3436,7 @@ class NewItemsViewer(QDialog):
         self._status_col = self.tbl.columnCount()
         self.tbl.setColumnCount(self._status_col+1)
         self.tbl.setHorizontalHeaderItem(self._status_col,QTableWidgetItem('상태'))
-        visible = {self._hidx.get('프로젝트코드'),
-                   self._hidx.get('프로젝트명',self._hidx.get('과제명',self._hidx.get('제목')))}
-        for column in range(1,self._status_col):
-            self.tbl.setColumnHidden(column,column not in visible)
-            if column in visible:
-                self.tbl.horizontalHeader().setSectionResizeMode(column,QHeaderView.Stretch)
+        self._toggle_detail_columns(self.host.columns_action.isChecked())
         self.tbl.horizontalHeader().setSectionResizeMode(self._status_col,QHeaderView.Interactive)
         self.tbl.setColumnWidth(self._status_col,130)
         for row in range(self.tbl.rowCount()):
@@ -3449,6 +3444,16 @@ class NewItemsViewer(QDialog):
         if self.tbl.rowCount():
             self.tbl.setCurrentCell(0,self._hidx.get('프로젝트코드',1))
         self._refresh_project_detail()
+
+    def _toggle_detail_columns(self, visible):
+        if not hasattr(self,'_hidx'):
+            return
+        summary = {self._hidx.get('프로젝트코드'),
+                   self._hidx.get('프로젝트명',self._hidx.get('과제명',self._hidx.get('제목')))}
+        for column in range(1,self._status_col):
+            self.tbl.setColumnHidden(column,not visible and column not in summary)
+            self.tbl.horizontalHeader().setSectionResizeMode(
+                column,QHeaderView.ResizeToContents if visible else QHeaderView.Stretch)
 
     @staticmethod
     def _project_result_label(result):
@@ -6336,6 +6341,9 @@ class AccessManager(QMainWindow):
         for column in (self.COL_NAME,self.COL_LV3,self.COL_DEPT,self.COL_ROLE):
             self.table.setColumnHidden(column,not visible)
         self.table.horizontalHeaderItem(self.COL_LV2).setText('Level2' if visible else 'Level2 / Level3')
+        viewer = getattr(self,'_newdlg',None)
+        if viewer is not None:
+            viewer._toggle_detail_columns(visible)
 
 
     def _switch_workspace(self,index):

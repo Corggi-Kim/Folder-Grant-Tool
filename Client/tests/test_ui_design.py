@@ -132,6 +132,25 @@ class DesignTests(unittest.TestCase):
         self.assertFalse(w.table.isColumnHidden(w.COL_LV3))
         self.assertEqual(w.table.horizontalHeaderItem(w.COL_LV2).text(),'Level2')
 
+    def test_detail_column_setting_applies_to_projects_and_reload(self):
+        w=self.window
+        w.columns_action.setChecked(True)
+        v=self.m.NewItemsViewer(w)
+        w._newdlg=v
+        self.addCleanup(v.close)
+        header=['프로젝트코드','프로젝트명','요청자','부서']
+        rows=[['26012','Example','Kim','DM']]
+        v.set_data(header,rows)
+        self.assertFalse(v.tbl.isColumnHidden(v._hidx['요청자']))
+        w.columns_action.setChecked(False)
+        self.assertTrue(v.tbl.isColumnHidden(v._hidx['요청자']))
+        self.assertFalse(v.tbl.isColumnHidden(v._hidx['프로젝트명']))
+        self.assertFalse(v.tbl.isColumnHidden(v._status_col))
+        w.columns_action.setChecked(True)
+        v.set_data(header,rows)
+        self.assertFalse(v.tbl.isColumnHidden(v._hidx['부서']))
+        self.assertEqual(v.tbl.item(0,v._hidx['요청자']).text(),'Kim')
+
     def test_theme_switch_persists_choice_in_both_directions(self):
         w = self.window
         for mode in ('dark','light'):
