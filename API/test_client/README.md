@@ -28,3 +28,7 @@ cd C:\Folder-Grant-Tool\API
 7. 서버가 `powershell` 모드이면 실제 권한이 변경됩니다. 반드시 테스트 자원만 사용하십시오.
 
 API Key는 디스크에 저장하지 않으며 프로그램을 다시 실행할 때 재입력해야 합니다. 서버 URL만 Windows 사용자 설정에 저장합니다.
+
+## 정식 화면과의 구분
+
+이 개발 도구의 Preview는 실행 계획 계산용 `/preview`입니다. 정식 BUS Client의 **요청 검증**은 실제 자원을 읽기 전용 조회하는 `/validate`를 사용합니다. BUS 조회·완료, 두 탭의 상세·진행·상세 열 설정은 정식 [Client](../../Client/README.md)에서 제공합니다. 내부 오픈 자료는 [docs](../../docs/README.md)를 참고하세요.

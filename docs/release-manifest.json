@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-26",
+  "source_commit": "ebbdfb9d4b8ffe09456bc2c9cc5c4dd4a16328d7",
+  "inputs": {
+    "docs/API_설계_운영_유지보수_Beta.docx": "3ace44c3f26ed84a52e5b7f1f8b52a1594d3e1d9eb9df8e7bb48f06f10bbaa20",
+    "docs/Client_설계_사용_유지보수_Beta.docx": "a309c10a572eed108b23bcddd7fa843aa9bd153a64d58909d0a71bd52351d31d",
+    "docs/Folder_Grant_프로그램_소개서_Beta.pptx": "e432155dcc9de5fa53cef2036658889f4fd3d56affa8b700b9f57de2ea6b1073"
+  },
+  "outputs": {
+    "API_설계_운영_유지보수.docx": "d1419900aa75cae66f32f3a36fa56bbfc444f02222b8ce4d07d1ff69df98ca62",
+    "Client_설계_사용_유지보수.docx": "cf9cec06be4e5ab153bd5a20394b8d21fd98d2b88f902fcfbb417842b860683d",
+    "오픈_운영_인수인계.docx": "c8fd0eaba29bc2bc7f2d99db128f0a6b7a22102fe7e0866d8a93971eb4af4372",
+    "Folder_Grant_프로그램_소개서.pptx": "776eee0533f10aed8f4d843854b4812a46274db862615a9e8c091f6cf6c1e03a",
+    "Folder_Grant_개발완료_보고서.pptx": "c1d4a2b7673f6253d463194dea816b0a81d8770ffdcfd835de02e3433c998ce5"
+  }
+}

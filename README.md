@@ -1,30 +1,55 @@
-# Folder Grant Tool · Beta
+# Folder Grant Tool
 
 BUS의 권한 요청과 신규 프로젝트 요청을 처리하는 **Windows Client + API 서버**입니다. Client는 BUS 조회·완료와 사용자 화면을 담당하고, API 서버는 AD 그룹·폴더 권한 변경과 작업 이력을 관리합니다.
 
-| 구성 | 현재 버전 | 역할 | 안내 |
-|---|---|---|---|
-| `API/` | 0.4.0 | 요청 검증, Preview, Job 실행·조회·취소·권한 재시도 | [서버 설치·운영](API/README.md) |
-| `Client/` | V1.1.0 Build:20261022 | BUS 조회·완료, 수동·Excel 입력, 결과 확인 | [Client 설치·사용](Client/README.md) |
-| `API/test_client/` | 개발 도구 | 수동 API 시험, BUS 연동 없음 | [개발 도구 안내](API/test_client/README.md) |
+2026-10-26 `main`의 `ebbdfb9d4b8f`를 기준으로 내부 오픈용 문서를 갱신했습니다. 프로그램 표기는 API **0.4.0**, Client **V1.1.0 Build:20261022**이며 문서 갱신일과 빌드 날짜는 다릅니다. 현장 인수와 업무 오픈 승인은 [인수인계 문서](docs/오픈_운영_인수인계.docx)에 별도로 기록합니다.
 
-기존 `Folder Grant Tool_v3.3.5.pyw`는 별도로 보존합니다. 정식 BUS Client의 실행 파일은 `Client/Folder Grant API Client.pyw`입니다.
+| 구성 | 역할 | 안내 |
+|---|---|---|
+| `API/` | 정책·실제 자원 검증, 권한·프로젝트 Job 실행·조회·취소, 권한 실패 단계 재실행 | [서버 설치·운영](API/README.md) |
+| `Client/` | BUS 조회·완료, 수동·Excel 입력, 요청 검증, 진행·결과 확인 | [Client 설치·사용](Client/README.md) |
+| `API/test_client/` | BUS 연동 없이 API 계약·계획·Job을 시험하는 개발 도구 | [개발 도구](API/test_client/README.md) |
 
-## 베타 문서
+기존 `Folder Grant Tool_v3.3.5.pyw`는 별도 보존합니다. 정식 BUS Client 실행 파일은 `Client/Folder Grant API Client.pyw`입니다.
 
-[문서 목록과 읽는 순서](docs/README.md)
+## 문서와 보고 자료
 
-- [API 설계·운영·유지보수 · Word](docs/API_설계_운영_유지보수_Beta.docx)
-- [Client 설계·사용·유지보수 · Word](docs/Client_설계_사용_유지보수_Beta.docx)
-- [Folder Grant 프로그램 소개서 · PowerPoint](docs/Folder_Grant_프로그램_소개서_Beta.pptx)
+[문서 목록·읽는 순서·수정 원칙](docs/README.md)
 
-## 시작 순서
+- [API 설계·운영·유지보수 · Word](docs/API_설계_운영_유지보수.docx)
+- [Client 설계·사용·유지보수 · Word](docs/Client_설계_사용_유지보수.docx)
+- [오픈·운영 인수인계 및 체크리스트 · Word](docs/오픈_운영_인수인계.docx)
+- [프로그램 소개서 · PowerPoint](docs/Folder_Grant_프로그램_소개서.pptx)
+- [개발 완료 보고서 · PowerPoint](docs/Folder_Grant_개발완료_보고서.pptx)
+- [최신 변경·검증 기록](docs/RELEASE_NOTES.md) · [오픈 확인 목록](docs/OPEN_CHECKLIST.md)
 
-1. 서버를 `mock`으로 실행해 인증·DB·Preview·상태 흐름을 확인합니다.
-2. [Client 안내](Client/README.md)에 따라 설치하고 서버 주소·API Key·BUS 계정을 설정합니다.
-3. Mock과 분리한 DB·테스트 자원에서 PowerShell 모드를 검증합니다. 첫 실제 시험은 자동 BUS 완료를 끄고 수행합니다.
-4. 실제 그룹·폴더 권한과 BUS 완료를 확인한 뒤 제한된 베타 대상에 배포합니다.
+## 기본 작업 흐름
 
-`powershell` 모드는 실제 AD·폴더 ACL을 변경합니다. Preview와 Mock은 BUS 완료를 처리하지 않습니다. API 성공과 BUS 완료 성공은 별도 결과입니다.
+1. 시작 로딩에서 API 연결·BUS 로그인과 두 목록을 준비합니다.
+2. 필요한 경우 BUS 조회로 목록을 갱신하고, 요청을 체크합니다. 알림·배지와 새 요청 자동 감지는 현재 비활성화 상태입니다.
+3. **요청 검증**으로 서버가 실제 사용자·그룹·요청 폴더·현재 ACL 또는 신규 생성 준비 상태를 읽기 전용 조회합니다.
+4. **선택 실행**으로 실제 Job을 등록하고 오른쪽에서 단계별 진행·오류·결과를 확인합니다.
+5. 실제 성공한 BUS 요청만 자동 완료하거나 **BUS 완료 재확인**으로 최신 결과를 조회한 뒤 완료합니다. 두 탭 모두 같은 완료 조건을 사용합니다.
 
-현재 Worker는 API 프로세스 안에서 실행되며 서버 재시작 후 진행 Job을 자동 복구하지 않습니다. 서비스 자동 재시작·중지는 권한 롤백이나 Job 복구를 뜻하지 않습니다. 베타 오픈 점검과 장애 대응은 Word 문서를 참고하세요.
+BUS 조회 행은 읽기 전용이며, 권한 목록의 수동·직접 Excel 입력만 편집할 수 있습니다. 양쪽 목록에 우클릭 삭제, 상세 열 공통 토글, 선택 건수와 단계 회전 표시를 제공합니다. 목록 삭제는 BUS 원본과 서버 이력을 삭제하지 않습니다.
+
+## 설치와 오픈 순서
+
+1. [API 안내](API/README.md)에 따라 별도 Mock 환경에서 인증·DB·Preview·Job 흐름을 확인합니다. Mock은 실제 자원을 검증하지 않습니다.
+2. [Client 안내](Client/README.md)에 따라 Windows PC에 설치하고 주소·키·BUS 계정을 설정합니다.
+3. Mock과 분리한 DB·시험 자원에서 PowerShell 모드로 **요청 검증 → 실제 소량 실행**을 확인합니다. 첫 시험은 자동 BUS 완료를 끕니다.
+4. 실제 AD·ACL·프로젝트 생성, 실패·재실행·중지, 양쪽 BUS 완료 재확인을 시험하고 담당자가 인수 결과를 기록합니다.
+5. 담당자·범위·문의·백업·중단 기준을 확정하고 승인한 범위에서 내부 오픈합니다.
+
+## 구분해야 할 결과와 현재 제한
+
+- **요청 검증(`/validate`)**: 실제 자원을 읽기 전용 조회. Job·권한 변경·BUS 완료 없음. `All`은 별도 검증에서 제외합니다.
+- **개발용 Preview(`/preview`)**: 실행 계획만 계산. 실제 자원 존재나 변경 권한을 검증하지 않습니다.
+- **Mock**: Job·DB 흐름 모의 실행. 실제 AD·ACL 변경·BUS 완료 없음.
+- **PowerShell 실행**: 실제 그룹·폴더·ACL 변경. API 최종 성공과 BUS 완료는 별도 결과입니다.
+
+Worker는 API 프로세스의 BackgroundTasks입니다. 재시작 후 진행 Job 자동 복구, 자동 권한 롤백, 사용자별 인증·권한 분리, 프로젝트별 실행 잠금, 자동 로그 순환은 제공하지 않습니다. 서비스 재시작 전 활성 Job·PowerShell을 확인하고 같은 프로젝트의 동시 작업은 운영 절차로 통제합니다. 기본 공유 API Key·HTTP와 평문 저장 파일의 접근 범위도 배포 환경에서 관리해야 합니다.
+
+## 검증 기록
+
+2026-10-26 기준 API **76개 통과·선택 PowerShell 시험 5개 건너뜀**, Client **125개 통과**입니다. 실제 Windows·Chrome·BUS·AD·SMB 인수 시험과 성능·부하 시험의 완료를 뜻하지 않습니다. 실행 명령과 현장 확인 항목은 각 README와 오픈 문서를 참고하세요.
