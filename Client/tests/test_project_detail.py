@@ -27,9 +27,8 @@ class ProjectDetailTests(unittest.TestCase):
         v._on_project_progress(0,live)
         self.assertEqual(self.states(v),['succeeded','succeeded','running','queued','queued','queued','queued','queued'])
         self.assertEqual(item.data(self.m.Qt.UserRole)['result']['job_id'],'old')
-        self.assertEqual(v.detail_values['작업 ID'].text(),'J1')
-        self.assertEqual(v.detail_values['보안 그룹'].text(),'target-ensure_ad_group')
-        self.assertEqual(v.detail_values['템플릿'].text(),'template')
+        self.assertEqual(v.detail_values['경로'].text(),'target-ensure_project_folder')
+        self.assertEqual(set(v.detail_values),{'프로젝트코드','프로젝트명','경로','신청자'})
         self.assertIn('현재 단계',v.detail_result.text())
         v.tbl.setCurrentCell(1,v._hidx['프로젝트코드']);self.app.processEvents()
         self.assertEqual(self.states(v),['queued']*8)
@@ -90,6 +89,28 @@ class ProjectDetailTests(unittest.TestCase):
         self.assertGreater(v.detail_result_scroll.verticalScrollBar().maximum(),0)
         self.assertEqual(v.detail_result.textFormat(),self.m.Qt.PlainText)
         self.assertEqual(v.detail_scroll.horizontalScrollBar().maximum(),0)
-        field=v.detail_values['원본 요청번호']
-        self.assertEqual(field.text(),v.tbl.item(0,v._hidx['프로젝트코드']).data(self.m.Qt.UserRole)['request_id'])
+        long_path = r'\\server\share\folder-' + 'long-folder-'*30
+        result['steps'][1]['target'] = long_path
+        v._on_project_result(0,result)
+        for _ in range(5):self.app.processEvents()
+        field=v.detail_values['경로']
+        self.assertEqual(field.text(),long_path)
         self.assertGreater(field.document().firstBlock().layout().lineCount(),1)
+
+    def test_detail_fields_are_filtered_without_discarding_bus_identity(self):
+        v=self.viewer()
+        header=['프로젝트코드','프로젝트명','폴더경로','요청자사번','요청자성명','요청자부서/팀','요청일','요청번호','승인자','기타']
+        values=['26012','First',r'\\server\share\26012','E1','Tester','DM','2026-10-26','BUS-123','Manager','keep']
+        v.set_data(header,[values]);v._refresh_project_detail()
+        item=v.tbl.item(0,v._hidx['프로젝트코드']);identity=item.data(self.m.Qt.UserRole)['request_id']
+        self.assertEqual(set(v.detail_values),{'프로젝트코드','프로젝트명','경로','요청자사번','요청자성명','요청자부서/팀'})
+        self.assertEqual(v.detail_values['경로'].text(),values[2])
+        v._toggle_detail_columns(True)
+        for name in header:
+            self.assertEqual(v.tbl.isColumnHidden(v._hidx[name]),v._project_field_kind(name) is None)
+        self.assertEqual(v.tbl.item(0,v._hidx['기타']).text(),'keep')
+        self.assertEqual(identity,self.m.make_bus_request_id(dict(proj='26012',project_name='First'),self.m.bus_row_identity(header,values)))
+        self.assertNotIn('작업 ID',v.detail_values)
+        v._toggle_detail_columns(False)
+        self.assertTrue(v.tbl.isColumnHidden(v._hidx['폴더경로']))
+        self.assertFalse(v.tbl.isColumnHidden(v._status_col))
