@@ -3112,38 +3112,31 @@ class NewItemsViewer(QDialog):
         self.tbl.horizontalHeader().setFixedHeight(43)
         self.tbl.setAlternatingRowColors(False)
         self.actions_bar = QWidget(); self.actions_bar.setObjectName('actionsBar')
-        btns = QHBoxLayout(self.actions_bar); btns.setContentsMargins(20,12,20,10)
-        self.btn_create = QPushButton('선택실행'); self.btn_create.setObjectName('primaryButton')
+        btns = QHBoxLayout(self.actions_bar); btns.setContentsMargins(20,12,20,10); btns.setSpacing(9)
+        self.btn_create = QPushButton('선택 실행'); self.btn_create.setObjectName('primaryButton')
         self.btn_create.clicked.connect(lambda: self._on_create_clicked(dry_run=False))
         self.btn_preview = QPushButton('요청 검증')
         self.btn_preview.clicked.connect(lambda: self._on_create_clicked(dry_run=True))
+        self.btn_complete = QPushButton('BUS 완료 재확인')
+        self.btn_complete.clicked.connect(lambda: self._on_create_clicked(completion_only=True))
 
-        self.status_lbl = QLabel("")
-        self.status_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.status_lbl.setMinimumWidth(420)
-        self.status_lbl.setStyleSheet("padding-right: 12px; padding-bottom: 2px;")
+        self.status_lbl = QLabel('',self); self.status_lbl.hide()
         self.prg = QProgressBar(self)
         self.prg.setRange(0, 0)
         self.prg.setFixedSize(0, 0)
         self.prg.hide()
 
-        bar = QHBoxLayout()
-        bar.setContentsMargins(0, 0, 12, 6)
-        bar.addStretch()
-        bar.addWidget(self.status_lbl, 0, Qt.AlignRight | Qt.AlignVCenter)
-        lay.addLayout(bar)
-
         self._last_worker_msg = ""
         self.worker_thread = None
         self.worker = None
-        self.chk_auto_complete = QCheckBox('실제 성공 후 BUS 완료')
+        self.chk_auto_complete = QCheckBox('성공 후 BUS 자동 완료')
         self.chk_auto_complete.setChecked(True)
         self.btn_stop = QPushButton('중지')
         self.btn_stop.clicked.connect(lambda: self.worker.stop() if self.worker else None)
         self.selection_label = QLabel('선택 0건'); self.selection_label.setObjectName('selectionLabel')
         btns.addWidget(self.selection_label)
         btns.addWidget(self.chk_auto_complete); btns.addStretch()
-        btns.addWidget(self.btn_preview); btns.addWidget(self.btn_create); btns.addWidget(self.btn_stop)
+        btns.addWidget(self.btn_preview); btns.addWidget(self.btn_create); btns.addWidget(self.btn_complete); btns.addWidget(self.btn_stop)
         self.btn_stop.setObjectName('dangerButton')
         self.btn_stop.setEnabled(False)
         self.tbl.model().rowsRemoved.connect(self._refresh_selection)
@@ -3153,6 +3146,7 @@ class NewItemsViewer(QDialog):
     def _refresh_selection(self, *args):
         selected = sum(self._is_row_checked(row) for row in range(self.tbl.rowCount()))
         self.selection_label.setText(f'선택 {selected}건')
+        self.host._sync_selection_label_width(self.selection_label)
         self.tbl.horizontalHeader().setChecked(bool(self.tbl.rowCount()) and selected == self.tbl.rowCount())
 
     def _can_delete_rows(self):
@@ -3217,6 +3211,7 @@ class NewItemsViewer(QDialog):
         self.btn_create.setEnabled(not on)
         self.btn_refresh.setEnabled(not on)
         self.btn_preview.setEnabled(not on)
+        self.btn_complete.setEnabled(not on)
         self.tbl.setContextMenuPolicy(Qt.PreventContextMenu if on else Qt.CustomContextMenu)
         self.chk_auto_complete.setEnabled(not on)
         self.btn_stop.setEnabled(on)
@@ -3224,11 +3219,14 @@ class NewItemsViewer(QDialog):
     def _on_worker_progress(self, cur: int, total: int, message: str):
         self.status_lbl.setText(message)
         self._last_worker_msg = message
+        self.detail_result.setText(message)
         self.host._set_progress_status(message,done=cur,total=total,running=True)
 
     def _on_worker_finished(self,ok_cnt,fail_cnt):
-        prefix = '요청 검증 완료' if getattr(self,'_validation_running',False) else f'실제 성공 {ok_cnt} / 실패 {fail_cnt}'
+        prefix = (f'BUS 완료 {ok_cnt} / 보류·실패 {fail_cnt}' if getattr(self,'_completion_running',False)
+                  else '요청 검증 완료' if getattr(self,'_validation_running',False) else f'실제 성공 {ok_cnt} / 실패 {fail_cnt}')
         self.status_lbl.setText(prefix+' - '+self._last_worker_msg)
+        self._refresh_project_detail()
 
 
     def _manual_add(self,proj,name):
@@ -3376,6 +3374,10 @@ class NewItemsViewer(QDialog):
     def _project_result_label(result):
         if result.get('bus_done'):
             return 'BUS 완료'
+        if result.get('completion_check_failed'):
+            return 'BUS 완료 확인 불가'
+        if result.get('completion_only'):
+            return 'BUS 완료 보류'
         return {'preview':'요청 검증','succeeded':'서버 성공','failed':'실패',
                 'cancelled':'중지됨','running':'실행 중','queued':'실행 대기'}.get(result.get('status'),'실행 대기')
 
@@ -3396,6 +3398,9 @@ class NewItemsViewer(QDialog):
             self.detail_values[name] = value
         code_item = self.tbl.item(row,self._hidx.get('프로젝트코드',-1))
         meta = dict(code_item.data(Qt.UserRole) or {}) if code_item else {}
+        if meta.get('completion_check_error'):
+            self.detail_result.setText('BUS 완료 확인 불가\n'+meta['completion_check_error'])
+            return
         result = meta.get('validation_result') if meta.get('show_validation') else meta.get('result') or {}
         lines = [validation_label(result) if result.get('status')=='validated' else self._project_result_label(result)]
         for key,label in [('job_id','작업 ID'),('error_code','오류'),('message','메시지')]:
@@ -3437,7 +3442,7 @@ class NewItemsViewer(QDialog):
         return items
 
 
-    def _on_create_clicked(self, dry_run=False):
+    def _on_create_clicked(self, dry_run=False, completion_only=False):
         parent = self.host
         if parent._closing or parent._waiting_for_bus or self.worker_thread is not None or parent.api_thread is not None or parent.session.is_busy():
             return
@@ -3457,6 +3462,9 @@ class NewItemsViewer(QDialog):
             if not checkbox or not checkbox.isChecked() or not code_item:
                 continue
             meta = dict(code_item.data(Qt.UserRole) or {})
+            if completion_only and (meta.get('source')!='bus' or meta.get('bus_done') or not meta.get('request_id')):
+                parent._log(f'{row+1}행: 미완료 BUS 요청이 아니므로 완료 재확인에서 제외했습니다.')
+                continue
             if meta.get('bus_done') and not dry_run:
                 continue
             project = code_item.text().strip()
@@ -3472,12 +3480,12 @@ class NewItemsViewer(QDialog):
         parent.stop_requested = False
         parent._progress_started_at = time.monotonic()
         parent._progress_elapsed = 0.0
-        parent._progress_detail = '요청 검증 중' if dry_run else '프로젝트 생성 중'
+        parent._progress_detail = 'BUS 완료 재확인 중' if completion_only else '요청 검증 중' if dry_run else '프로젝트 생성 중'
         parent.done_jobs = 0; parent.total_jobs = len(items)
         parent._set_running_ui(True)
         self.worker_thread = QThread(self)
         self.worker = CreateWorker(items,dict(parent.creds),parent._api_client(),
-                                   dry_run=dry_run, validate_only=dry_run,
+                                   dry_run=dry_run, validate_only=dry_run, completion_only=completion_only,
                                    auto_complete=self.chk_auto_complete.isChecked(),
                                    requested_by=parent._requester())
         self.worker.moveToThread(self.worker_thread)
@@ -3490,7 +3498,8 @@ class NewItemsViewer(QDialog):
         self.worker_thread.finished.connect(self._project_thread_finished)
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
         self._validation_running = dry_run
-        self._set_busy(True,'요청 검증 시작' if dry_run else 'API 프로젝트 작업 시작')
+        self._completion_running = completion_only
+        self._set_busy(True,'BUS 완료 재확인 시작' if completion_only else '요청 검증 시작' if dry_run else 'API 프로젝트 작업 시작')
         if parent.stop_requested or parent._closing:
             self.worker.stop()
         self.worker_thread.start()
@@ -3503,7 +3512,11 @@ class NewItemsViewer(QDialog):
         item = self.tbl.item(row,col) if col >= 0 else None
         if item:
             meta = dict(item.data(Qt.UserRole) or {})
-            if result.get('status') == 'validated':
+            meta.pop('completion_check_error',None)
+            if result.get('completion_check_failed'):
+                meta.pop('show_validation',None)
+                meta['completion_check_error'] = result.get('error_message','서버 결과 확인 불가')
+            elif result.get('status') == 'validated':
                 meta.update(validation_result=result,show_validation=True)
             else:
                 meta.pop('show_validation',None)
@@ -3515,8 +3528,9 @@ class NewItemsViewer(QDialog):
         if result.get('status') == 'validated':
             self.host._log_validation(result,f'프로젝트 {item.text() if item else row+1}')
             return
-        self.host._log('프로젝트 결과: '+json.dumps(result,ensure_ascii=False,indent=2),
-                       summary=self.host._api_log_summary(result,f'프로젝트 {item.text() if item else row+1}'))
+        summary = (f'프로젝트 {item.text() if item else row+1}: '+self._project_result_label(result)+' · '+(result.get('message') or result.get('error_message') or '')
+                   if result.get('completion_only') else self.host._api_log_summary(result,f'프로젝트 {item.text() if item else row+1}'))
+        self.host._log('프로젝트 결과: '+json.dumps(result,ensure_ascii=False,indent=2),summary=summary)
 
 
     def _project_thread_finished(self):
@@ -3550,11 +3564,14 @@ class CreateWorker(QObject):
     finished = pyqtSignal(int, int)
     error = pyqtSignal(str)
 
-    def __init__(self,items,creds,client,dry_run=False,auto_complete=True,requested_by='client-operator',parent=None,validate_only=False):
+    def __init__(self,items,creds,client,dry_run=False,auto_complete=True,requested_by='client-operator',parent=None,validate_only=False,completion_only=False):
         super().__init__(parent)
         self.items,self.creds,self.client = items,creds,client
         self.dry_run,self.auto_complete,self.requested_by = dry_run,auto_complete,requested_by
         self.validate_only = validate_only
+        if completion_only and (dry_run or validate_only):
+            raise ValueError('BUS 완료 재확인은 요청 검증·Preview와 함께 실행할 수 없습니다.')
+        self.completion_only = completion_only
         self._stop = False
         self._active_job = None
 
@@ -3923,7 +3940,56 @@ class CreateWorker(QObject):
                     pass
 
 
+    def _run_completion_only(self):
+        completed = pending = 0
+        try:
+            for index,item in enumerate(self.items):
+                if self._stop:
+                    break
+                request_id = item.get('request_id')
+                if item.get('source')!='bus' or item.get('bus_done') or not request_id:
+                    continue
+                self.progress.emit(index,len(self.items),f"{item['proj']} 서버 결과 재조회")
+                try:
+                    result = self.client.request('GET','/api/v1/project-jobs/by-request/'+quote(request_id,safe=''))
+                    if (result.get('request_id')!=request_id or not result.get('job_id')
+                            or result.get('project_code')!=canonical_project_code(item['proj'])
+                            or result.get('project_name')!=item.get('name','').strip()):
+                        raise ApiClientError('서버 프로젝트 작업이 현재 BUS 요청과 일치하지 않습니다.')
+                    if self._stop:
+                        break
+                    result = dict(result,completion_only=True,bus_done=False)
+                    if can_complete_bus(result,'bus',self._stop):
+                        if not self.creds.get('id') or not self.creds.get('pw'):
+                            message = 'BUS 계정 누락: 계정 설정 후 완료만 다시 시도하세요.'
+                        else:
+                            ok,message = self._bus_click_process(item['proj'])
+                            result['bus_done'] = bool(ok)
+                    else:
+                        message = '서버 실제 성공이 확인되지 않아 BUS 완료를 보류했습니다.'
+                    result['message'] = message
+                    completed += int(result['bus_done'])
+                    pending += int(not result['bus_done'])
+                except Exception as exc:
+                    message = str(exc)
+                    if self.client.api_key:
+                        message = message.replace(self.client.api_key,'[API Key]')
+                    result = dict(completion_only=True,completion_check_failed=True,
+                                  status='completion_unknown',bus_done=False,error_message=message)
+                    pending += 1
+                self.itemResult.emit(item.get('row',index),result)
+                self.progress.emit(index+1,len(self.items),f"{item['proj']}: "+('BUS 완료' if result.get('bus_done') else 'BUS 완료 보류'))
+        except Exception as exc:
+            message = str(exc).replace(self.client.api_key,'[API Key]') if self.client.api_key else str(exc)
+            self.error.emit(message)
+            pending += 1
+        finally:
+            self.finished.emit(completed,pending)
+
     def run(self):
+        if self.completion_only:
+            self._run_completion_only()
+            return
         ok_count = fail_count = 0
         try:
             for index,item in enumerate(self.items):
@@ -5429,7 +5495,7 @@ class AccessManager(QMainWindow):
         ]
         if newdlg is not None:
             to_disable.extend([newdlg.btn_manual,newdlg.btn_refresh,newdlg.btn_create,
-                               newdlg.btn_preview,newdlg.chk_auto_complete])
+                               newdlg.btn_preview,newdlg.btn_complete,newdlg.chk_auto_complete])
         if newdlg is not None:
             newdlg.tbl.setContextMenuPolicy(Qt.PreventContextMenu if running else Qt.CustomContextMenu)
         for w in to_disable:
@@ -6089,6 +6155,17 @@ class AccessManager(QMainWindow):
             QTimer.singleShot(0,self._refresh_ui)
 
 
+    def _sync_selection_label_width(self, extra=None):
+        labels = [self.selection_label]
+        viewer = getattr(self,'_newdlg',None)
+        if viewer is not None:
+            labels.append(viewer.selection_label)
+        if extra is not None and extra not in labels:
+            labels.append(extra)
+        width = max(label.fontMetrics().horizontalAdvance(label.text()) for label in labels)+2
+        for label in labels:
+            label.setFixedWidth(width)
+
     def _refresh_ui(self):
         self._ui_refresh_pending = False
         selected = running = completed = attention = 0
@@ -6105,6 +6182,7 @@ class AccessManager(QMainWindow):
             completed += int(tone=='green')
             attention += int(tone in {'red','amber'})
         self.selection_label.setText(f'선택 {selected}건')
+        self._sync_selection_label_width()
         self.table.horizontalHeader().setChecked(bool(self.table.rowCount()) and selected==self.table.rowCount())
         self.summary_label.setText(f'전체 {self.table.rowCount()}건 · 실행 중 {running} · 완료 {completed} · 확인 필요 {attention}')
         self._fit_table_columns()

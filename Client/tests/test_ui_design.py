@@ -178,7 +178,7 @@ class DesignTests(unittest.TestCase):
         pos = lambda widget:widget.mapTo(w,self.m.QPoint(0,0))
         self.assertEqual(v.btn_refresh.text(),'BUS 신규조회')
         self.assertEqual(v.btn_manual.text(),'수동 추가')
-        self.assertEqual(v.btn_create.text(),'선택실행')
+        self.assertEqual(v.btn_create.text(),'선택 실행')
         self.assertFalse(hasattr(v,'btn_close'))
         self.assertLess(pos(v.toolbar).y(),pos(v.tbl).y())
         self.assertGreater(pos(v.actions_bar).y(),pos(w.logs_panel).y()+w.logs_panel.height()-5)
