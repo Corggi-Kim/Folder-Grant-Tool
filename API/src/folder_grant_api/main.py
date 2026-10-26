@@ -24,7 +24,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="Folder Grant API",
         version=__version__,
-        description="BUS와 테스트 클라이언트가 사용하는 폴더 권한 처리 API",
+        description="클라이언트가 사용하는 폴더 권한 처리 API",
         lifespan=lifespan,
     )
     app.state.settings = settings or get_settings()
