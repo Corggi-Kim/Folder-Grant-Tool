@@ -31,4 +31,4 @@ API Key는 디스크에 저장하지 않으며 프로그램을 다시 실행할 
 
 ## 정식 화면과의 구분
 
-이 개발 도구의 Preview는 실행 계획 계산용 `/preview`입니다. 정식 BUS Client의 **요청 검증**은 실제 자원을 읽기 전용 조회하는 `/validate`를 사용합니다. BUS 조회·완료, 두 탭의 상세·진행·상세 열 설정은 정식 [Client](../../Client/README.md)에서 제공합니다. 내부 오픈 자료는 [docs](../../docs/README.md)를 참고하세요.
+이 개발 도구의 Preview는 실행 계획 계산용 `/preview`입니다. 정식 BUS Client는 권한 요청 선택 실행의 자동 검증에 `/access-jobs/validate`를 사용합니다. 별도 검증 버튼은 숨겼으며 신규 프로젝트는 사전 검증 없이 생성 Job을 바로 등록합니다. 권한 탭의 Mock 검증은 확인 불가로 보류되므로 Mock Job 시험은 이 개발 도구나 Swagger에서 수행합니다. BUS 조회·완료, 두 탭의 상세·진행·상세 열 설정은 정식 [Client](../../Client/README.md)에서 제공합니다. 내부 오픈 자료는 [docs](../../docs/README.md)를 참고하세요.
