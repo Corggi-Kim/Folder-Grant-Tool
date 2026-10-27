@@ -85,13 +85,13 @@ HELP_PAGES = (
     ("처음 사용하기", (
         ("01 · 연결 확인", "프로그램을 켜면 서버 연결과 BUS 로그인 후 요청을 불러옵니다. 로그인창이 나오면 BUS 계정과 암호를 입력하세요. 계정 저장은 직접 선택할 수 있습니다."),
         ("02 · 요청 살펴보기", "권한 요청 또는 신규 프로젝트 탭에서 목록을 확인하세요. 행을 선택하면 오른쪽 선택 요청 상세에 해당 요청의 정보와 진행 상태가 표시됩니다."),
-        ("03 · 확인하고 실행", "처리할 항목을 체크하고 선택 실행을 누르세요. 권한 요청과 신규 프로젝트 모두 실제 자원을 먼저 검증하고 통과한 항목만 실행합니다. 보류된 이유는 작업 로그에서 확인하세요."),
+        ("03 · 확인하고 실행", "처리할 항목을 체크하고 선택 실행을 누르세요. 권한 요청은 실제 자원을 먼저 검증하고 통과한 항목만 실행합니다. 신규 프로젝트는 바로 생성 작업을 시작합니다. 보류된 이유는 작업 로그에서 확인하세요."),
         ("04 · 완료 확인", "작업 결과를 목록과 오른쪽 상세에서 확인하세요. BUS 자동 완료 옵션을 켜 두면 실제 작업이 모두 성공한 BUS 요청만 완료 처리됩니다. 수동 입력과 엑셀로 추가한 항목은 BUS 완료 대상이 아닙니다."),
     )),
     ("버튼 안내", (
         ("권한 요청 · 목록 준비", "수동 입력은 직접 요청을 추가할 때, 엑셀 불러오기는 파일에 정리된 요청을 가져올 때 사용합니다. BUS 요청 조회를 누르면 BUS의 권한 요청을 다시 불러옵니다."),
         ("신규 프로젝트 · 목록 준비", "수동 추가로 프로젝트를 직접 입력하거나 BUS 신규 조회로 프로젝트 생성 요청을 불러오세요. 필요한 항목을 체크한 뒤 아래의 선택 실행을 누르면 됩니다."),
-        ("선택 실행과 자동 검증", "선택 실행을 누르면 서버에서 실제 사용자·그룹·폴더 등 필요한 자원을 먼저 확인합니다. 검증을 통과한 항목만 실행하고, 실패·주의·확인 불가이면 실행을 보류합니다. 검증 결과와 이유는 작업 로그에서 확인하세요."),
+        ("선택 실행과 자동 검증", "권한 요청은 실제 사용자·그룹·폴더를 먼저 검증하고 통과한 항목만 실행합니다. 신규 프로젝트는 사전 검증 없이 그룹·폴더 생성 작업을 등록하며, 생성 과정과 최종 확인은 서버에서 수행합니다. 결과와 오류는 작업 로그에서 확인하세요."),
         ("BUS 완료 재확인", "권한 작업은 성공했는데 BUS 완료가 되지 않았을 때 사용하세요. 서버 결과를 다시 확인한 뒤 완료 처리를 시도합니다. 권한 작업 자체를 다시 실행하는 버튼은 아닙니다."),
         ("중지", "다음 항목의 실행을 멈추고 진행 중인 작업에 취소를 요청합니다. 이미 진행 중인 처리는 멈추기까지 시간이 걸릴 수 있으며, 적용된 권한이 자동으로 되돌아가지는 않습니다."),
     )),
@@ -3313,7 +3313,7 @@ class NewItemsViewer(QDialog):
         self.selection_label = QLabel('선택 0건'); self.selection_label.setObjectName('selectionLabel')
         btns.addWidget(self.selection_label)
         btns.addWidget(self.chk_auto_complete); btns.addStretch()
-        # btns.addWidget(self.btn_preview)  # 선택 실행에서 자동 검증
+        # btns.addWidget(self.btn_preview)  # 신규 프로젝트의 별도 사전 검증 버튼은 비활성 유지
         btns.addWidget(self.btn_create); btns.addWidget(self.btn_complete); btns.addWidget(self.btn_stop)
         self.btn_stop.setObjectName('dangerButton')
         self.btn_stop.setEnabled(False)
@@ -4330,7 +4330,7 @@ class CreateWorker(QObject):
                 if not self.dry_run and not self.validate_only and can_complete_bus(cached,source) and not item.get('bus_done'):
                     result = dict(cached)
                 else:
-                    self._active_job = ApiJobWorker(self.client,'project',payload,self.dry_run,validate_only=self.validate_only,preflight=not self.dry_run and not self.validate_only)
+                    self._active_job = ApiJobWorker(self.client,'project',payload,self.dry_run,validate_only=self.validate_only,preflight=False)
                     self._active_job.progress.connect(lambda result,row=item.get('row',index):self.itemProgress.emit(row,result))
                     if self._stop:
                         self._active_job.stop()

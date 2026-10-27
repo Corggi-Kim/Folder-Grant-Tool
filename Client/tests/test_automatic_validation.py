@@ -80,15 +80,18 @@ class AutomaticValidationTests(unittest.TestCase):
         self.assertFalse(self.fixture.completed)
         self.assertTrue(w.btn_preview.isHidden())
 
-    def test_project_worker_blocks_bus_and_registration_on_preflight_failure(self):
-        api=Mock();api.request.return_value=validation('BUS-X','failed')
-        worker=self.m.CreateWorker([dict(proj='26012',name='X',source='bus',request_id='BUS-X')],{},api)
-        worker._bus_click_process=Mock();results=[]
-        worker.itemResult.connect(lambda row,result:results.append(result))
-        worker.run()
-        api.request.assert_called_once()
-        self.assertTrue(api.request.call_args.args[1].endswith('/validate'))
-        self.assertTrue(results[0]['preflight_blocked'])
-        worker._bus_click_process.assert_not_called()
+    def test_project_execution_registers_directly_without_preflight(self):
+        for status,mode in [('succeeded','powershell'),('simulated','mock'),('failed','powershell')]:
+            with self.subTest(status=status):
+                api=Mock();api.request.return_value=dict(request_id='BUS-X',job_id='PROJECT',status=status,executor_mode=mode)
+                worker=self.m.CreateWorker([dict(proj='26012',name='X',source='bus',request_id='BUS-X')],{},api,auto_complete=False)
+                worker._bus_click_process=Mock();results=[]
+                worker.itemResult.connect(lambda row,result:results.append(result))
+                worker.run()
+                api.request.assert_called_once()
+                self.assertEqual(api.request.call_args.args[:2],('POST','/api/v1/project-jobs'))
+                self.assertEqual(results[0]['job_id'],'PROJECT')
+                self.assertNotIn('preflight_blocked',results[0])
+                worker._bus_click_process.assert_not_called()
         v=self.m.NewItemsViewer(self.window);self.addCleanup(v.close)
         self.assertTrue(v.btn_preview.isHidden())
