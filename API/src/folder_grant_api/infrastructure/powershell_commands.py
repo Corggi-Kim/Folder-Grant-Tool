@@ -16,6 +16,10 @@ def quote(value: str) -> str:
 
 def build_step_command(step: JobStepRecord) -> str:
     details = step.details or {}
+    if step.step_type == "prepare_isolated_group":
+        return _prepare_isolated_group(step)
+    if step.step_type == "grant_isolated_base_acl":
+        return _require_folder(step.target) + _project_group_acl_grant(step, "RX", require_security=True)
     if step.step_type == "add_ad_group_member":
         return (
             f"Add-ADGroupMember -Identity {quote(step.target)} "
@@ -61,12 +65,13 @@ def _icacls_grant(path_expression: str, principal: str, permission: str, recursi
     )
 
 
-def _project_group_acl_grant(step: JobStepRecord, permission: str) -> str:
+def _project_group_acl_grant(step: JobStepRecord, permission: str, *, require_security: bool = False) -> str:
     """Grant to the exact AD group SID instead of relying on name resolution."""
     principal = (step.details or {})["principal"]
     return (
         f"$group=Get-ADGroup -Identity {quote(principal)} -Properties SID -ErrorAction Stop;"
-        "$groupSid=[string]$group.SID;"
+        + ("if ([string]$group.GroupCategory -ne 'Security') { throw 'GROUP_NOT_SECURITY' };" if require_security else "")
+        + "$groupSid=[string]$group.SID;"
         "if ([string]::IsNullOrWhiteSpace($groupSid)) { throw 'GROUP_SID_NOT_FOUND' };"
         "$sidPrincipal='*' + $groupSid;"
         f"icacls {quote(step.target)} /grant ($sidPrincipal + {quote(':' + permission)});"
@@ -211,4 +216,34 @@ def _verify_project_creation_command(step: JobStepRecord) -> str:
         "$requiredStudyAll=[System.Security.AccessControl.FileSystemRights]::Modify;"
         "if (($studyAllRights -band $requiredStudyAll) -ne $requiredStudyAll) { throw ('STUDY_ALL_ACL_NOT_FOUND:SID=' + $groupSid + ':RIGHTS=' + [int64]$studyAllRights) };"
         "Write-Output 'PROJECT_VERIFIED';"
+    )
+
+
+def _require_folder(path):
+    return (f"$item=Get-Item -LiteralPath {quote(path)} -ErrorAction Stop;"
+            "if (-not $item.PSIsContainer) { throw 'PATH_NOT_FOUND' };")
+
+
+def _prepare_isolated_group(step):
+    details = step.details or {}
+    guards = ''.join(_require_folder(path) for path in details['required_paths'])
+    return (guards +
+        "$group=$null;"
+        "try {"
+        f"$group=Get-ADGroup -Identity {quote(step.target)} -ErrorAction Stop;"
+        "} catch { if ($_.Exception.GetType().FullName -notmatch 'ADIdentityNotFoundException') { throw } };"
+        "if ($group) {"
+        "if ([string]$group.GroupCategory -ne 'Security') { throw 'GROUP_NOT_SECURITY' };"
+        "Write-Output 'GROUP_EXISTS';"
+        "} else {"
+        f"$null=Get-ADOrganizationalUnit -Identity {quote(details['group_ou_path'])} -ErrorAction Stop;"
+        "$description='';"
+        "try {"
+        f"$source=Get-ADGroup -Identity {quote(details['description_source_group'])} -Properties Description -ErrorAction Stop;"
+        "$description=[string]$source.Description;"
+        "} catch { $description='' };"
+        f"New-ADGroup -Name {quote(step.target)} -SamAccountName {quote(step.target)} "
+        "-GroupCategory Security -GroupScope DomainLocal "
+        f"-Path {quote(details['group_ou_path'])} -Description $description -ErrorAction Stop;"
+        "Start-Sleep -Seconds 15;Write-Output 'GROUP_CREATED';}"
     )

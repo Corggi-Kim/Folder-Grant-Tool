@@ -98,6 +98,7 @@ HELP_PAGES = (
     ("문제 해결", (
         ("부분 성공은 어떤 뜻인가요?", "일부 단계만 처리된 상태입니다. 예를 들어 그룹에 사용자를 추가했지만 폴더 권한 적용에는 실패했을 수 있습니다. 오른쪽 상세에서 실패한 단계와 이유를 확인하세요. 이 상태에서는 BUS를 완료 처리하지 않습니다."),
         ("문제를 고친 뒤 다시 실행하려면?", "폴더 누락 등 표시된 원인을 먼저 해결하세요. 실패하거나 부분 성공한 권한 요청을 체크하고 선택 실행을 누른 뒤 재시도 안내를 확인하세요. 이전에 성공한 단계는 유지하고 남은 단계를 다시 처리합니다."),
+        ("Isolated 보안그룹 생성 확인", "Isolated 그룹만 없고 기존 폴더 등 준비 조건을 확인한 경우 생성 여부를 묻습니다. 계속을 누르면 서버가 그룹과 기본 읽기 권한을 준비한 뒤 다시 검증합니다. 폴더 자체를 만들지는 않으며, 취소하면 실행을 보류합니다. 이번 세션 자동 생성은 동의한 경우에만 적용됩니다."),
         ("시간 초과 또는 결과 확인이 안 될 때", "오래 걸리는 작업은 아직 처리 중일 수 있습니다. 권한 요청의 BUS 완료 재확인으로 서버 상태를 확인하세요. 실패가 확인되면 원인을 해결한 뒤 재시도하고, 결과가 확실하지 않다면 중복 실행 전에 관리자에게 확인하세요."),
         ("목록이 비어 있거나 조회에 실패했을 때", "상단의 서버 연결과 BUS 로그인 상태를 확인하고 해당 탭의 BUS 조회 버튼을 눌러 주세요. 연결 정보나 계정이 바뀌었다면 톱니바퀴 메뉴의 설정에서 수정할 수 있습니다."),
         ("목록에서 수정하거나 삭제할 때", "BUS에서 조회한 권한 요청은 목록에서 수정할 수 없습니다. 직접 입력하거나 엑셀로 불러온 권한 요청만 수정할 수 있습니다. 두 목록에서 마우스 오른쪽 버튼을 누르면 행 삭제, 선택 행 삭제, 전체 삭제를 사용할 수 있습니다. 삭제는 화면 목록에만 적용되며 BUS 요청이나 서버 이력은 삭제하지 않습니다."),
@@ -501,7 +502,9 @@ def make_project_payload(project_code: str, project_name: str, request_id: str,
 
 def can_complete_bus(result: dict, source: str, stopped: bool = False) -> bool:
     return bool(not stopped and source == 'bus' and result.get('status') == 'succeeded'
-                and result.get('executor_mode') == 'powershell')
+                and result.get('executor_mode') == 'powershell'
+                and (result.get('result') or {}).get('job_kind') != 'group_preparation'
+                and not any(step.get('type')=='prepare_isolated_group' for step in (result.get('steps') or [])))
 
 
 def make_bus_request_id(values: dict, bus_identity: str = '') -> str:
@@ -598,8 +601,9 @@ class ApiJobWorker(QObject):
     succeeded = pyqtSignal(dict)
     failed = pyqtSignal(str)
     finished = pyqtSignal()
+    groupPreparationRequested = pyqtSignal(dict)
 
-    def __init__(self, client: FolderGrantApiClient, kind: str, payload: dict, dry_run: bool = False, retry_job_id: str = None, validate_only: bool = False, preflight: bool = False):
+    def __init__(self, client: FolderGrantApiClient, kind: str, payload: dict, dry_run: bool = False, retry_job_id: str = None, validate_only: bool = False, preflight: bool = False, prepare_group: bool = False, group_preparation_payload: dict | None = None):
         super().__init__()
         if kind not in {'access', 'project'}:
             raise ValueError('알 수 없는 API 작업 종류입니다.')
@@ -611,6 +615,12 @@ class ApiJobWorker(QObject):
         self.retry_job_id = retry_job_id
         self.validate_only = validate_only
         self.preflight = preflight
+        self.prepare_group = prepare_group
+        if prepare_group and (kind!='access' or dry_run or validate_only or preflight or retry_job_id):
+            raise ValueError('그룹 준비는 별도 권한 준비 작업으로만 실행할 수 있습니다.')
+        self.group_preparation_payload = dict(group_preparation_payload) if group_preparation_payload else None
+        self._group_answer = threading.Event()
+        self._group_approved = False
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -634,6 +644,69 @@ class ApiJobWorker(QObject):
                   for step in job.get('steps',[])]
         if not expected or expected != actual:
             raise ApiClientError('기존 Job과 현재 Preview의 실행 계획이 다릅니다. 요청번호 충돌을 확인하세요.',409)
+
+    def respond_to_group_preparation(self, approved):
+        self._group_approved = bool(approved)
+        self._group_answer.set()
+
+    def _read_preflight(self):
+        self.progress.emit(dict(status='validating'))
+        checker = ApiJobWorker(self.client,self.kind,self.payload,validate_only=True)
+        checker._stop_event = self._stop_event
+        try:
+            return checker.execute()
+        except Exception as exc:
+            return dict(status='validated',request_id=self.payload['request_id'],validation_status='unknown',
+                preflight_error=True,checks=[dict(id='preflight',label='실행 전 검증',target='',status='unknown',message=str(exc))])
+
+    def _is_isolated_grant(self):
+        return (self.kind=='access' and self.payload.get('operation')=='grant'
+                and self.payload.get('project_status')=='progress' and str(self.payload.get('level2','')).lower()=='isolated')
+
+    def _confirm_group_preparation(self, validation):
+        hint = validation.get('group_preparation')
+        if not (self._is_isolated_grant() and validation.get('executor_mode')=='powershell'
+                and validation.get('validation_status')=='failed' and isinstance(hint,dict)
+                and all(isinstance(hint.get(k),str) and hint[k].strip() for k in ('group_name','root_path','isolated_path'))):
+            return False
+        if self._stop_event.is_set() or self.receivers(self.groupPreparationRequested)==0:
+            return False
+        self._group_answer.clear(); self._group_approved = False
+        self.progress.emit(dict(status='awaiting_group_confirmation',validation=validation))
+        self.groupPreparationRequested.emit(dict(hint,request_id=self.payload['request_id'],project_code=self.payload.get('project_code')))
+        while not self._group_answer.wait(.1):
+            if self._stop_event.is_set(): return False
+        return self._group_approved and not self._stop_event.is_set()
+
+    def _run_group_preparation(self, preparation):
+        expected = dict(self.payload)
+        identity = preparation.get('request_id')
+        if (not self._is_isolated_grant() or not identity or identity==self.payload['request_id']
+                or preparation.get('confirm_group_creation') is not True
+                or {k:v for k,v in preparation.items() if k not in {'request_id','confirm_group_creation'}} != {k:v for k,v in expected.items() if k!='request_id'}):
+            raise ApiClientError('보관된 그룹 준비 요청과 현재 요청이 일치하지 않습니다.')
+        self.progress.emit(dict(status='preparing',preparation_payload=preparation))
+        worker = ApiJobWorker(self.client,'access',preparation,prepare_group=True)
+        worker._stop_event = self._stop_event
+        worker.poll_interval = self.poll_interval; worker.max_wait_seconds = self.max_wait_seconds
+        worker.progress.connect(lambda report:self.progress.emit(dict(status='preparing',preparation_progress=report)))
+        try:
+            result = worker.execute()
+        except ApiClientError as exc:
+            rejected = exc.status_code is not None and 400<=exc.status_code<500
+            result = dict(status='rejected' if rejected else 'unknown',request_id=identity,error_message=str(exc))
+        except Exception as exc:
+            result = dict(status='unknown',request_id=identity,error_message=str(exc))
+        finished = result.get('status') in FINAL_JOB_STATUSES or result.get('status')=='rejected'
+        self.progress.emit(dict(status='preparing',preparation_result=result,clear_preparation=finished))
+        if (result.get('status')!='succeeded' or result.get('executor_mode')!='powershell'
+                or result.get('request_id')!=identity or not result.get('job_id') or self._stop_event.is_set()):
+            return dict(status='validated',request_id=self.payload['request_id'],validation_status='unknown',
+                client_stopped=self._stop_event.is_set(),preflight_blocked=True,preparation_result=result,
+                checks=[dict(id='group_preparation',label='Isolated 보안 그룹 준비',target='',status='unknown',
+                             message=result.get('error_message') or '그룹 준비 성공을 확인하지 못했습니다. 권한 작업은 실행하지 않았습니다.')],
+                message='그룹 준비가 완료되지 않아 권한 실행을 보류했습니다. 준비 Job과 실제 그룹·기본 권한을 확인하세요.')
+        return None
 
     def execute(self) -> dict:
         """Also used by the project batch worker in its own Qt thread."""
@@ -665,14 +738,16 @@ class ApiJobWorker(QObject):
             preview = self.client.request('POST', path + '/preview', self.payload)
             return {**preview, 'status': 'preview', 'client_stopped': self._stop_event.is_set()}
         if self.preflight:
-            self.progress.emit(dict(status='validating'))
-            checker = ApiJobWorker(self.client,self.kind,self.payload,validate_only=True)
-            checker._stop_event = self._stop_event
-            try:
-                validation = checker.execute()
-            except Exception as exc:
-                validation = dict(status='validated',request_id=self.payload['request_id'],validation_status='unknown',
-                    preflight_error=True,checks=[dict(id='preflight',label='실행 전 검증',target='',status='unknown',message=str(exc))])
+            # Recover only the exact previously approved preparation identity after an uncertain response.
+            if self.group_preparation_payload:
+                blocked = self._run_group_preparation(self.group_preparation_payload)
+                if blocked: return blocked
+            validation = self._read_preflight()
+            if self._confirm_group_preparation(validation):
+                preparation = dict(self.payload,request_id='PREP-'+uuid4().hex,confirm_group_creation=True)
+                blocked = self._run_group_preparation(preparation)
+                if blocked: return blocked
+                validation = self._read_preflight()
             if validation.get('validation_status')=='passed' and validation.get('executor_mode')!='powershell':
                 validation = dict(validation,validation_status='unknown',checks=[*validation.get('checks',[]),
                     dict(id='executor',label='실제 자원 검증 모드',target='',status='unknown',message='PowerShell 모드의 실제 검증을 확인하지 못했습니다.')])
@@ -689,11 +764,13 @@ class ApiJobWorker(QObject):
                 job = self.client.request('POST',path+'/'+quote(self.retry_job_id,safe='')+'/retry',
                                           {'requested_by':self.payload['requested_by']})
             else:
-                job = self.client.request('POST', path, self.payload)
+                job = self.client.request('POST', path+('/prepare-group' if self.prepare_group else ''), self.payload)
         except ApiClientError as exc:
             if self.retry_job_id and exc.status_code==404:
                 raise ApiClientError('재실행 API를 사용할 수 없습니다. API 서버를 최신 버전으로 업데이트하고 재시작하세요.',404) from exc
-            bus_conflict = not self.retry_job_id and exc.status_code == 409 and self.payload.get('source') == 'bus'
+            if self.prepare_group and exc.status_code==404:
+                raise ApiClientError('그룹 준비 API가 없습니다. API 서버를 업데이트하고 재시작하세요.',404) from exc
+            bus_conflict = not self.prepare_group and not self.retry_job_id and exc.status_code == 409 and self.payload.get('source') == 'bus'
             if exc.status_code is not None and exc.status_code < 500 and not bus_conflict:
                 raise
             # An accepted POST can lose its response. Never generate a new ID here.
@@ -707,6 +784,8 @@ class ApiJobWorker(QObject):
                     job = {**job,'replayed':True,'recovered_after_actor_conflict':True}
             except ApiClientError as recovery:
                 raise ApiClientError(f'등록 결과를 확인하지 못했습니다. 같은 요청으로 재시도하세요. request_id={self.payload["request_id"]}: {recovery}') from exc
+        if self.prepare_group and job.get('request_id')!=self.payload['request_id']:
+            raise ApiClientError('그룹 준비 Job의 요청번호가 일치하지 않습니다.')
         self.job_id = job.get('job_id')
         if not self.job_id:
             raise ApiClientError('API 응답에 job_id가 없습니다.')
@@ -4439,6 +4518,8 @@ def validation_label(result):
 
 
 def request_status_presentation(status):
+    if status in {'그룹 생성 확인 중','보안 그룹 준비 중'}:
+        return status,'blue'
     if status.startswith('요청 검증'):
         return status, 'muted' if '통과' in status else 'blue' if status.endswith('중') else 'amber'
     if 'BUS 완료' == status:
@@ -5797,11 +5878,12 @@ class AccessManager(QMainWindow):
         thread = QThread(self)
         worker = ApiJobWorker(self._api_client(),'access',
                               dict(payload,requested_by=self._requester()) if retry_job_id else payload,
-                              dry,retry_job_id=retry_job_id,validate_only=dry,preflight=not dry)
+                              dry,retry_job_id=retry_job_id,validate_only=dry,preflight=not dry,group_preparation_payload=meta.get('group_preparation_payload'))
         self.api_thread,self.api_worker = thread,worker
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.progress.connect(self._on_api_progress)
+        worker.groupPreparationRequested.connect(self._on_group_preparation_requested)
         worker.succeeded.connect(self._on_api_result)
         worker.failed.connect(self._on_api_error)
         worker.finished.connect(worker.deleteLater)
@@ -6287,10 +6369,45 @@ class AccessManager(QMainWindow):
         return {**values, 'row': row, 'path': path}
 
 
+    def _on_group_preparation_requested(self, info):
+        worker = self.sender() or self.api_worker
+        if (not isinstance(worker,ApiJobWorker) or worker is not self.api_worker
+                or worker.payload.get('request_id')!=info.get('request_id') or self._closing or self.stop_requested):
+            if isinstance(worker,ApiJobWorker): worker.respond_to_group_preparation(False)
+            return
+        if getattr(self,'_auto_create_isolated_group',False):
+            worker.respond_to_group_preparation(True)
+            return
+        box = QMessageBox(self); box.setWindowTitle('Isolated 보안그룹 생성'); box.setIcon(QMessageBox.Question)
+        box.setTextFormat(Qt.PlainText)
+        box.setText(f"보안그룹 '{info['group_name']}'이(가) 없습니다.\n생성 후 기본 읽기 권한을 적용하고 다시 검증할까요?")
+        box.setInformativeText('기존 프로젝트·Isolated 폴더에만 적용합니다. 폴더를 새로 만들거나 사용자 권한을 바로 부여하지 않습니다.')
+        box.setDetailedText('프로젝트: '+info.get('root_path','')+'\nIsolated: '+info.get('isolated_path',''))
+        accept = box.addButton('계속',QMessageBox.AcceptRole)
+        cancel = box.addButton('취소',QMessageBox.RejectRole); box.setDefaultButton(cancel); box.setEscapeButton(cancel)
+        remember = QCheckBox('이번 세션 동안 자동 생성(다시 묻지 않음)',box); box.setCheckBox(remember)
+        box.exec_()
+        approved = box.clickedButton() is accept and not self.stop_requested and not self._closing
+        if approved and remember.isChecked(): self._auto_create_isolated_group = True
+        self._log('Isolated 보안그룹 생성 '+('동의' if approved else '취소')+': '+info['group_name'])
+        worker.respond_to_group_preparation(approved)
+
     def _on_api_progress(self, job):
         self._set_api_connection_state(True,job)
         meta = self._row_metadata(self.current_row)
-        if job.get('auto_validation'):
+        if job.get('status') in {'awaiting_group_confirmation','preparing'}:
+            meta.update(live_result=dict(status=job['status']),show_validation=False)
+            if job.get('validation'):
+                self._log_validation(job['validation'],f'{self.current_row+1}행 · 그룹 생성 전 확인')
+            if job.get('preparation_payload'):
+                meta['group_preparation_payload'] = dict(job['preparation_payload'])
+            if job.get('preparation_result'):
+                meta['preparation_result'] = dict(job['preparation_result'])
+                self._log(json.dumps(job['preparation_result'],ensure_ascii=False,indent=2),
+                          summary=f"{self.current_row+1}행 · Isolated 그룹 준비: {job['preparation_result'].get('status','확인 불가')}")
+            if job.get('clear_preparation'): meta.pop('group_preparation_payload',None)
+            self.table.item(self.current_row,self.COL_STATUS).setText('그룹 생성 확인 중' if job['status']=='awaiting_group_confirmation' else '보안 그룹 준비 중')
+        elif job.get('auto_validation'):
             meta.update(validation_result=job,show_validation=False,live_result=dict(valid=True,status='submitting'))
             self._log_validation(job,f'{self.current_row+1}행 · 실행 전 검증')
             self.table.item(self.current_row,self.COL_STATUS).setText('API 실행중')
@@ -6480,7 +6597,7 @@ class AccessManager(QMainWindow):
         values = self._row_values(row) if valid else {}
         meta = self._row_metadata(row) if valid else {}
         result = meta.get('result') or {}
-        active = self._get(row,self.COL_STATUS) in {'API 실행중','요청 검증 중'}
+        active = self._get(row,self.COL_STATUS) in {'API 실행중','요청 검증 중','그룹 생성 확인 중','보안 그룹 준비 중'}
         if active:
             result = meta.get('live_result') or (result if result.get('status')=='running' else {})
         self.detail_project.setText(values.get('proj') or '-')
@@ -6498,7 +6615,7 @@ class AccessManager(QMainWindow):
             statuses[0] = 'succeeded'
         if valid and '검증실패' in self._get(row,self.COL_STATUS):
             statuses[0] = 'failed'
-        if active and self._get(row,self.COL_STATUS)=='요청 검증 중':
+        if active and self._get(row,self.COL_STATUS) in {'요청 검증 중','그룹 생성 확인 중','보안 그룹 준비 중'}:
             statuses[0] = 'running'
         elif active and result.get('status')=='submitting':
             statuses[0] = 'running'
@@ -6512,6 +6629,7 @@ class AccessManager(QMainWindow):
             if steps and all(s.get('status')=='succeeded' for s in steps): return 'succeeded'
             return 'queued'
         statuses[1] = phase(groups); statuses[2] = phase(acls)
+        if active and result.get('status')=='preparing': statuses[1] = 'running'
         if meta.get('bus_done'):
             statuses[3] = 'succeeded'
         elif valid and self._get(row,self.COL_STATUS)=='완료 처리중':

@@ -5,7 +5,7 @@ from folder_grant_api.api.routes.project_jobs import create_project_plan
 from folder_grant_api.schemas.access_job import AccessJobRequest
 from folder_grant_api.schemas.project_job import ProjectJobRequest
 from folder_grant_api.schemas.validation import ValidationResponse
-from folder_grant_api.services.validation_service import access_probes, project_probes, validate_resources
+from folder_grant_api.services.validation_service import access_probes, project_probes, validate_resources, validate_access_resources
 
 router = APIRouter(tags=['validation'], dependencies=[Depends(require_api_key)])
 
@@ -14,7 +14,7 @@ router = APIRouter(tags=['validation'], dependencies=[Depends(require_api_key)])
 def validate_access(payload: AccessJobRequest, request: Request):
     settings = request.app.state.settings
     plan = create_plan(payload, settings)
-    return validate_resources(payload.request_id, access_probes(payload, plan, settings), settings)
+    return validate_access_resources(payload, plan, settings)
 
 
 @router.post('/api/v1/project-jobs/validate', response_model=ValidationResponse)

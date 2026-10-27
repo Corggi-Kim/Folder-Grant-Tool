@@ -12,7 +12,14 @@ class ValidationCheck(BaseModel):
     message: str
 
 
+class GroupPreparation(BaseModel):
+    group_name: str
+    root_path: str
+    isolated_path: str
+
+
 class ValidationResponse(BaseModel):
+    group_preparation: GroupPreparation | None = None
     request_id: str
     executor_mode: Literal['mock', 'powershell']
     validation_status: Literal['passed', 'failed', 'warning', 'unknown']

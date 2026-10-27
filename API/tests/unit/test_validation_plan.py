@@ -51,3 +51,17 @@ def test_script_distinguishes_unknown_and_missing_and_does_not_recurse():
     assert 'ADIdentityNotFoundException|ItemNotFoundException' in READ_ONLY_SCRIPT
     assert '선행 대상이 없거나 확인되지 않아' in READ_ONLY_SCRIPT
     assert '-Recurse' not in READ_ONLY_SCRIPT
+
+
+
+def test_isolated_preparation_probes_only_run_after_missing_group():
+    settings=Settings();payload=request(level2='Isolated',level3='ETC',role=None)
+    checks=access_probes(payload,create_plan(payload,settings),settings)
+    preparation_ids={'ou','preparation_share','preparation_root','preparation_isolated'}
+    assert {p['id'] for p in checks if p.get('when_group_missing')}==preparation_ids
+    assert all(p.get('when_group_missing') for p in checks if p['type'] in {'path','ou'})
+    guard="if ($p.when_group_missing -and $states['group'] -ne 'failed')"
+    assert guard in READ_ONLY_SCRIPT
+    assert READ_ONLY_SCRIPT.index(guard)<READ_ONLY_SCRIPT.index('    if ($p.when_missing)')
+    guarded=READ_ONLY_SCRIPT.split(guard,1)[1].split('    if ($p.when_missing)',1)[0]
+    assert "'not_applicable'" in guarded and 'continue' in guarded

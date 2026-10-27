@@ -6,7 +6,7 @@ from folder_grant_api.api.routes.preview import create_plan
 from folder_grant_api.api.security import require_api_key
 from folder_grant_api.infrastructure.models import JobRecord
 from folder_grant_api.infrastructure.job_repository import DuplicateRequestError
-from folder_grant_api.schemas.access_job import AccessJobRequest, CancelJobRequest, JobResponse, JobStepResponse
+from folder_grant_api.schemas.access_job import AccessJobRequest, PrepareGroupRequest, CancelJobRequest, JobResponse, JobStepResponse
 from folder_grant_api.services.job_service import (
     JobNotRetryableError,
     JobNotCancellableError,
@@ -90,6 +90,44 @@ def register_access_job(
             job.id,
         )
     return serialize_job(job, executor_mode=request.app.state.settings.executor_mode, replayed=replayed)
+
+
+@router.post("/prepare-group", response_model=JobResponse, status_code=status.HTTP_202_ACCEPTED)
+def prepare_isolated_group(payload: PrepareGroupRequest, background_tasks: BackgroundTasks,
+                           request: Request, response: Response, session: Session = Depends(get_session)):
+    from folder_grant_api.domain.operation_plan import OperationPlan, PlanStep
+    from folder_grant_api.domain.paths import format_group_name
+    from folder_grant_api.services.validation_service import preparation_scope, validate_access_resources
+    settings = request.app.state.settings
+    plan = create_plan(payload, settings)
+    if settings.executor_mode != 'powershell' or not preparation_scope(payload):
+        raise HTTPException(422, detail={"code": "GROUP_PREPARATION_NOT_ALLOWED", "message": "PowerShell 진행 Isolated 권한 부여만 그룹 준비가 가능합니다."})
+    service = JobService(session)
+    existing = service.repository.get_by_request_id(payload.request_id)
+    if existing:
+        if existing.request_payload != payload.model_dump(mode='json') or not existing.request_payload.get('confirm_group_creation'):
+            raise HTTPException(409, detail={"code": "REQUEST_ID_CONFLICT", "message": "요청번호가 다른 작업에 사용되었습니다."})
+        response.status_code = 200
+        return serialize_job(service.repository.latest_attempt(existing), executor_mode=settings.executor_mode, replayed=True)
+    ready = validate_access_resources(payload, plan, settings).group_preparation
+    if ready is None:
+        raise HTTPException(409, detail={"code": "GROUP_PREPARATION_NOT_READY", "message": "그룹 준비 조건을 만족하지 않습니다. 다시 검증하세요."})
+    preparation = OperationPlan(plan.canonical_project_code, ready.group_name, [ready.root_path, ready.isolated_path], [
+        PlanStep('prepare_isolated_group', 'Isolated 보안 그룹 준비', ready.group_name,
+                 metadata={'group_ou_path': settings.group_ou_path,
+                           'description_source_group': format_group_name(payload.project_code, 'Study'),
+                           'required_paths': [ready.root_path, ready.isolated_path]}),
+        *[PlanStep('grant_isolated_base_acl', 'Isolated 그룹 기본 RX 권한', path, 'read_execute',
+                   {'principal': ready.group_name}) for path in (ready.root_path, ready.isolated_path)]])
+    try:
+        job, replayed = service.register(payload, preparation)
+    except RequestIdConflictError as exc:
+        raise HTTPException(409, detail={"code": "REQUEST_ID_CONFLICT", "message": "요청번호가 다른 작업에 사용되었습니다."}) from exc
+    if replayed:
+        response.status_code = 200
+    else:
+        background_tasks.add_task(execute_job, request.app.state.session_factory, settings, job.id)
+    return serialize_job(job, executor_mode=settings.executor_mode, replayed=replayed)
 
 
 @router.get("/{job_id}", response_model=JobResponse)

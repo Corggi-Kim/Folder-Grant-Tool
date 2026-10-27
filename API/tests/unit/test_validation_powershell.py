@@ -34,6 +34,7 @@ function Get-ADGroup {
 }
 function Get-ADOrganizationalUnit {
  [CmdletBinding()] param($Identity)
+ if ($fixture.deny_ou) { throw [UnauthorizedAccessException]::new('OU must not be queried') }
  return [pscustomobject]@{DistinguishedName=$Identity}
 }
 function Get-Acl {
@@ -104,3 +105,16 @@ def test_existing_project_does_not_require_deleted_template():
     probes,paths=project();checks=run_script(probes,[paths[k] for k in ('share','project_root','study')])
     assert checks['template']['status']=='not_applicable'
     assert checks['root_acl']['status']=='passed'
+
+
+
+def test_existing_isolated_etc_group_never_queries_preparation_ou_or_paths():
+    settings=Settings()
+    payload=AccessJobRequest(request_id='I',source='swagger',operation='grant',project_status='progress',employee_id='E1',project_code='26012',level2='Isolated',level3='ETC',requested_by='op')
+    probes=access_probes(payload,create_plan(payload,settings),settings)
+    # Every folder is denied and the OU stub throws if invoked. ETC still passes.
+    paths=[p['target'] for p in probes if p['type']=='path']
+    checks=run_script(probes,[],denied=paths,deny_ou=True)
+    for id in ('ou','preparation_share','preparation_root','preparation_isolated'):
+        assert checks[id]['status']=='not_applicable'
+    assert all(c['status'] in ('passed','not_applicable') for c in checks.values())

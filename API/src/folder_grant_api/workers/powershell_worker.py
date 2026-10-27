@@ -68,7 +68,9 @@ def execute_powershell_job(session_factory: sessionmaker, settings: Settings, jo
         job.result_payload = {
             "executor_mode": "powershell",
             "changed_external_system": True,
-            "message": "모든 권한 작업 단계가 완료되었습니다.",
+            "message": ("Isolated 그룹 준비가 완료되었습니다. 권한 요청을 다시 검증하세요."
+                        if job.request_payload.get("confirm_group_creation") else "모든 권한 작업 단계가 완료되었습니다."),
+            **({"job_kind": "group_preparation"} if job.request_payload.get("confirm_group_creation") else {}),
         }
         job.finished_at = utc_now()
         session.add(AuditLogRecord(

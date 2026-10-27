@@ -235,3 +235,23 @@ python -m test_client.main
 [오픈·운영 인수인계 Word](../docs/오픈_운영_인수인계.docx)에 서비스 계정·환경·백업·실제 시험·승인·문의·중단 기준을 기록합니다. 비밀값은 문서에 넣지 않습니다. API Key를 가진 호출자의 `requested_by`가 신뢰 가능한 개인 인증 정보는 아니므로 사용자별 권한이 필요한 범위로 확대할 때는 인증 구조를 보완해야 합니다.
 
 업데이트는 접수 중단 → 활성 Job·잔존 PowerShell 확인 → 서비스 중지·일관된 DB/설정/코드 백업 → 의존성·설정 비교 → 서비스 시작 → health·인증 ready·검증·제한된 실제 시험 순서로 진행합니다. 코드·DB 복원만으로 AD·ACL 변경이 되돌아가지는 않습니다.
+
+### Missing Isolated group preparation
+
+`POST /api/v1/access-jobs/validate` adds `group_preparation` (`null` or
+`{group_name, root_path, isolated_path}`). It is offered only for PowerShell
+progress/grant/Isolated requests with a confirmed missing group and otherwise
+successful resource checks, including the configured OU and existing project and
+Isolated roots (also for ETC).
+
+`POST /api/v1/access-jobs/prepare-group` uses the access request fields plus required
+`confirm_group_creation: true` and a separate preparation `request_id`. It returns
+the usual asynchronous JobResponse. The server revalidates readiness and creates a
+Security DomainLocal group in the configured OU, copying the Study group's
+Description (empty if unavailable), waits 15 seconds, and grants that group's exact
+SID RX on the two existing roots without inheritance or recursion. It never creates
+folders, adds users, or grants user ACLs. Matching requests replay idempotently;
+ordinary access-job request IDs conflict. Preparation jobs cannot use `/retry`.
+GET, by-request and cancel work normally. A successful preparation is not a
+successful permission request: revalidate and submit the original access request
+separately. No database migration is required.
