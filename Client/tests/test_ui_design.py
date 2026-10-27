@@ -74,7 +74,8 @@ class DesignTests(unittest.TestCase):
     def test_preview_and_execute_route_to_same_existing_job_flow(self):
         w = self.window
         w.run_execute = Mock()
-        w.btn_preview.click()
+        self.assertTrue(w.btn_preview.isHidden())
+        w._preview_selected()
         self.assertTrue(w.chk_dry.isChecked())
         w.run_execute.assert_called_once()
         w.run_execute.reset_mock()
@@ -214,7 +215,7 @@ class DesignTests(unittest.TestCase):
         self.show()
         v = w._newdlg
         pos = lambda widget:widget.mapTo(w,self.m.QPoint(0,0))
-        self.assertEqual(v.btn_refresh.text(),'BUS 신규조회')
+        self.assertEqual(v.btn_refresh.text(),'BUS 신규 조회')
         self.assertEqual(v.btn_manual.text(),'수동 추가')
         self.assertEqual(v.btn_create.text(),'선택 실행')
         self.assertFalse(hasattr(v,'btn_close'))
@@ -225,7 +226,7 @@ class DesignTests(unittest.TestCase):
         self.assertFalse(v.btn_stop.isEnabled())
         self.assertEqual(v.btn_preview.text(),'요청 검증')
         self.assertFalse(hasattr(v,'chk_dry'))
-        self.assertLess(pos(v.btn_preview).x(),pos(v.btn_create).x())
+        self.assertTrue(v.btn_preview.isHidden())
         w.tabs.setCurrentIndex(0)
         self.assertTrue(v.actions_bar.isHidden())
 

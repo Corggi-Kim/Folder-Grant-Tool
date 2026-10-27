@@ -64,7 +64,7 @@ class ValidationTests(unittest.TestCase):
         w.table.setCurrentCell(-1,-1)
         api=Mock();api.api_key='key';api.request.return_value=validation(before['request_id'],'failed')
         w._api_client=Mock(return_value=api)
-        w.btn_preview.click();self.fixture.wait_for_api()
+        w._preview_selected();self.fixture.wait_for_api()
         self.assertEqual(w.table.currentRow(),row)
         meta=w._row_metadata(row)
         self.assertEqual(meta['result'],before['result'])

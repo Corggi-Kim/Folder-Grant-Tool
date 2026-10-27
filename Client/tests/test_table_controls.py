@@ -103,7 +103,7 @@ class TableControlTests(unittest.TestCase):
         api.request.side_effect=lambda method,path,payload: dict(request_id=payload['request_id'],validation_status='passed',checks=[dict(label='보안 그룹',target='LSK Test',status='passed',message='존재')])
         self.window._api_client = Mock(return_value=api)
         with patch.object(self.m.CreateWorker,'_bus_click_process') as bus:
-            v.btn_preview.click()
+            v._on_create_clicked(dry_run=True)
             deadline=time.monotonic()+3
             while v.worker_thread is not None and time.monotonic()<deadline:
                 self.app.processEvents();time.sleep(.01)
