@@ -85,13 +85,13 @@ HELP_PAGES = (
     ("처음 사용하기", (
         ("01 · 연결 확인", "프로그램을 켜면 서버 연결과 BUS 로그인 후 요청을 불러옵니다. 로그인창이 나오면 BUS 계정과 암호를 입력하세요. 계정 저장은 직접 선택할 수 있습니다."),
         ("02 · 요청 살펴보기", "권한 요청 또는 신규 프로젝트 탭에서 목록을 확인하세요. 행을 선택하면 오른쪽 선택 요청 상세에 해당 요청의 정보와 진행 상태가 표시됩니다."),
-        ("03 · 확인하고 실행", "처리할 항목의 체크박스를 선택하세요. 권한 요청은 요청 검증으로 먼저 확인한 뒤 선택 실행을 누르세요. 신규 프로젝트도 요청 검증으로 확인한 뒤 선택실행을 누르세요."),
+        ("03 · 확인하고 실행", "처리할 항목을 체크하고 선택 실행을 누르세요. 권한 요청과 신규 프로젝트 모두 실제 자원을 먼저 검증하고 통과한 항목만 실행합니다. 보류된 이유는 작업 로그에서 확인하세요."),
         ("04 · 완료 확인", "작업 결과를 목록과 오른쪽 상세에서 확인하세요. BUS 자동 완료 옵션을 켜 두면 실제 작업이 모두 성공한 BUS 요청만 완료 처리됩니다. 수동 입력과 엑셀로 추가한 항목은 BUS 완료 대상이 아닙니다."),
     )),
     ("버튼 안내", (
         ("권한 요청 · 목록 준비", "수동 입력은 직접 요청을 추가할 때, 엑셀 불러오기는 파일에 정리된 요청을 가져올 때 사용합니다. BUS 요청 조회를 누르면 BUS의 권한 요청을 다시 불러옵니다."),
-        ("신규 프로젝트 · 목록 준비", "수동 추가로 프로젝트를 직접 입력하거나 BUS 신규조회로 프로젝트 생성 요청을 불러오세요. 필요한 항목을 체크한 뒤 아래의 선택 실행을 누르면 됩니다."),
-        ("요청 검증 / 선택 실행", "요청 검증은 API 서버에서 사용자·보안 그룹·요청 경로와 현재 ACL을 읽기 전용으로 확인합니다. 실제 권한이나 폴더를 변경하지 않으며 항목별 결과는 작업 로그에 표시합니다. 선택 실행은 체크한 항목을 서버에 보내 처리합니다."),
+        ("신규 프로젝트 · 목록 준비", "수동 추가로 프로젝트를 직접 입력하거나 BUS 신규 조회로 프로젝트 생성 요청을 불러오세요. 필요한 항목을 체크한 뒤 아래의 선택 실행을 누르면 됩니다."),
+        ("선택 실행과 자동 검증", "선택 실행을 누르면 서버에서 실제 사용자·그룹·폴더 등 필요한 자원을 먼저 확인합니다. 검증을 통과한 항목만 실행하고, 실패·주의·확인 불가이면 실행을 보류합니다. 검증 결과와 이유는 작업 로그에서 확인하세요."),
         ("BUS 완료 재확인", "권한 작업은 성공했는데 BUS 완료가 되지 않았을 때 사용하세요. 서버 결과를 다시 확인한 뒤 완료 처리를 시도합니다. 권한 작업 자체를 다시 실행하는 버튼은 아닙니다."),
         ("중지", "다음 항목의 실행을 멈추고 진행 중인 작업에 취소를 요청합니다. 이미 진행 중인 처리는 멈추기까지 시간이 걸릴 수 있으며, 적용된 권한이 자동으로 되돌아가지는 않습니다."),
     )),
@@ -599,7 +599,7 @@ class ApiJobWorker(QObject):
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, client: FolderGrantApiClient, kind: str, payload: dict, dry_run: bool = False, retry_job_id: str = None, validate_only: bool = False):
+    def __init__(self, client: FolderGrantApiClient, kind: str, payload: dict, dry_run: bool = False, retry_job_id: str = None, validate_only: bool = False, preflight: bool = False):
         super().__init__()
         if kind not in {'access', 'project'}:
             raise ValueError('알 수 없는 API 작업 종류입니다.')
@@ -610,6 +610,7 @@ class ApiJobWorker(QObject):
         self.job_id = None
         self.retry_job_id = retry_job_id
         self.validate_only = validate_only
+        self.preflight = preflight
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -663,6 +664,26 @@ class ApiJobWorker(QObject):
         if self.dry_run:
             preview = self.client.request('POST', path + '/preview', self.payload)
             return {**preview, 'status': 'preview', 'client_stopped': self._stop_event.is_set()}
+        if self.preflight:
+            self.progress.emit(dict(status='validating'))
+            checker = ApiJobWorker(self.client,self.kind,self.payload,validate_only=True)
+            checker._stop_event = self._stop_event
+            try:
+                validation = checker.execute()
+            except Exception as exc:
+                validation = dict(status='validated',request_id=self.payload['request_id'],validation_status='unknown',
+                    preflight_error=True,checks=[dict(id='preflight',label='실행 전 검증',target='',status='unknown',message=str(exc))])
+            if validation.get('validation_status')=='passed' and validation.get('executor_mode')!='powershell':
+                validation = dict(validation,validation_status='unknown',checks=[*validation.get('checks',[]),
+                    dict(id='executor',label='실제 자원 검증 모드',target='',status='unknown',message='PowerShell 모드의 실제 검증을 확인하지 못했습니다.')])
+            stopped = self._stop_event.is_set()
+            if validation.get('validation_status')!='passed' or validation.get('executor_mode')!='powershell' or stopped:
+                return dict(validation,preflight_blocked=True,client_stopped=stopped,
+                            message='중지 요청으로 실행을 보류했습니다.' if stopped else '사전 검증이 통과하지 않아 실행을 보류했습니다.')
+            self.progress.emit(dict(validation,auto_validation=True))
+            # A UI signal can request cancellation immediately after validation.
+            if self._stop_event.is_set():
+                return dict(validation,preflight_blocked=True,client_stopped=True,message='중지 요청으로 실행을 보류했습니다.')
         try:
             if self.retry_job_id:
                 job = self.client.request('POST',path+'/'+quote(self.retry_job_id,safe='')+'/retry',
@@ -3123,10 +3144,10 @@ class NewItemsViewer(QDialog):
         top = QHBoxLayout(self.toolbar); top.setContentsMargins(15,12,12,12)
         heading = QLabel('요청 목록'); heading.setObjectName('sectionTitle')
         top.addWidget(heading)
-        # self.new_request_notice = QLabel('새 요청이 있습니다 · BUS 신규조회'); self.new_request_notice.setObjectName('mutedLabel'); self.new_request_notice.hide()
+        # self.new_request_notice = QLabel('새 요청이 있습니다 · BUS 신규 조회'); self.new_request_notice.setObjectName('mutedLabel'); self.new_request_notice.hide()
         # top.addWidget(self.new_request_notice); top.addStretch()
         top.addStretch()
-        self.btn_refresh = QPushButton('BUS 신규조회'); self.btn_refresh.setObjectName('primaryButton')
+        self.btn_refresh = QPushButton('BUS 신규 조회'); self.btn_refresh.setObjectName('primaryButton')
         self.btn_manual = QPushButton('수동 추가')
         top.addWidget(self.btn_manual); top.addWidget(self.btn_refresh)
         self.btn_manual.clicked.connect(self._on_manual_clicked)
@@ -3192,8 +3213,8 @@ class NewItemsViewer(QDialog):
         btns = QHBoxLayout(self.actions_bar); btns.setContentsMargins(20,12,20,10); btns.setSpacing(9)
         self.btn_create = QPushButton('선택 실행'); self.btn_create.setObjectName('primaryButton')
         self.btn_create.clicked.connect(lambda: self._on_create_clicked(dry_run=False))
-        self.btn_preview = QPushButton('요청 검증')
-        self.btn_preview.clicked.connect(lambda: self._on_create_clicked(dry_run=True))
+        self.btn_preview = QPushButton('요청 검증',self); self.btn_preview.hide()
+        # self.btn_preview.clicked.connect(lambda: self._on_create_clicked(dry_run=True))
         self.btn_complete = QPushButton('BUS 완료 재확인')
         self.btn_complete.clicked.connect(lambda: self._on_create_clicked(completion_only=True))
 
@@ -3213,7 +3234,8 @@ class NewItemsViewer(QDialog):
         self.selection_label = QLabel('선택 0건'); self.selection_label.setObjectName('selectionLabel')
         btns.addWidget(self.selection_label)
         btns.addWidget(self.chk_auto_complete); btns.addStretch()
-        btns.addWidget(self.btn_preview); btns.addWidget(self.btn_create); btns.addWidget(self.btn_complete); btns.addWidget(self.btn_stop)
+        # btns.addWidget(self.btn_preview)  # 선택 실행에서 자동 검증
+        btns.addWidget(self.btn_create); btns.addWidget(self.btn_complete); btns.addWidget(self.btn_stop)
         self.btn_stop.setObjectName('dangerButton')
         self.btn_stop.setEnabled(False)
         self.tbl.model().rowsRemoved.connect(self._refresh_selection)
@@ -3260,7 +3282,7 @@ class NewItemsViewer(QDialog):
     def _after_delete(self):
         if not self.tbl.rowCount():
             self.tbl.setCurrentCell(-1, -1)
-            self.tbl.set_empty_message('표시할 요청이 없습니다. BUS 신규조회 또는 수동 추가를 사용하세요.')
+            self.tbl.set_empty_message('표시할 요청이 없습니다. BUS 신규 조회 또는 수동 추가를 사용하세요.')
         self._refresh_project_detail()
 
     def _delete_row(self, row):
@@ -3465,8 +3487,8 @@ class NewItemsViewer(QDialog):
         if key in {'프로젝트코드','과제코드','projectcode'}: return 'code'
         if key in {'프로젝트명','과제명','제목','projectname'}: return 'name'
         if key in {'경로','폴더경로','프로젝트경로','프로젝트폴더경로','path','folderpath','projectpath'}: return 'path'
-        suffixes = {'','정보','사번','성명','이름','부서','팀','부서팀','직책','직급','이메일','연락처','id','name'}
-        if key in {'사번','성명','이름','부서','팀','부서팀','직책','직급','이메일','연락처'}: return 'requester'
+        suffixes = {'','정보','사번','성명','이름','부서','팀','부서팀','직급','이메일','연락처','id','name'}
+        if key in {'사번','성명','이름','부서','팀','부서팀','직급','이메일','연락처'}: return 'requester'
         for prefix in ('요청자','신청자','등록자','requester'):
             if key.startswith(prefix) and key[len(prefix):] in suffixes: return 'requester'
         return None
@@ -3606,6 +3628,9 @@ class NewItemsViewer(QDialog):
             return
         meta = dict(item.data(Qt.UserRole) or {})
         meta.pop('show_validation',None); meta.pop('completion_check_error',None)
+        if result.get('auto_validation'):
+            meta['validation_result'] = result
+            self.host._log_validation(result,f'{row+1}행 · 프로젝트 실행 전 검증')
         self._update_project_path(row,result)
         meta.update(live_result=dict(result),project_action=result.get('status','running'))
         item.setData(Qt.UserRole,meta)
@@ -3731,10 +3756,12 @@ class NewItemsViewer(QDialog):
                 meta.update(result=result,bus_done=result.get('bus_done',False))
             item.setData(Qt.UserRole,meta)
             item.setToolTip(json.dumps(result,ensure_ascii=False,indent=2))
-        self.tbl.setItem(row,self._status_col,QTableWidgetItem(validation_label(result) if result.get('status')=='validated' else self._project_result_label(result)))
+        self.tbl.setItem(row,self._status_col,QTableWidgetItem((('실행 보류 · ' if result.get('preflight_blocked') else '')+validation_label(result)) if result.get('status')=='validated' else self._project_result_label(result)))
         self._refresh_project_detail()
         if result.get('status') == 'validated':
             self.host._log_validation(result,f'프로젝트 {item.text() if item else row+1}')
+            if result.get('preflight_blocked'):
+                self.host._log(result.get('message','실행 보류'))
             return
         summary = (f'프로젝트 {item.text() if item else row+1}: '+self._project_result_label(result)+' · '+(result.get('message') or result.get('error_message') or '')
                    if result.get('completion_only') else self.host._api_log_summary(result,f'프로젝트 {item.text() if item else row+1}'))
@@ -4224,7 +4251,7 @@ class CreateWorker(QObject):
                 if not self.dry_run and not self.validate_only and can_complete_bus(cached,source) and not item.get('bus_done'):
                     result = dict(cached)
                 else:
-                    self._active_job = ApiJobWorker(self.client,'project',payload,self.dry_run,validate_only=self.validate_only)
+                    self._active_job = ApiJobWorker(self.client,'project',payload,self.dry_run,validate_only=self.validate_only,preflight=not self.dry_run and not self.validate_only)
                     self._active_job.progress.connect(lambda result,row=item.get('row',index):self.itemProgress.emit(row,result))
                     if self._stop:
                         self._active_job.stop()
@@ -4239,7 +4266,7 @@ class CreateWorker(QObject):
                 real_success = result.get('status')=='succeeded' and result.get('executor_mode')=='powershell'
                 if real_success:
                     ok_count += 1
-                elif result.get('status') not in {'preview','simulated','validated'}:
+                elif result.get('preflight_blocked') or result.get('status') not in {'preview','simulated','validated'}:
                     fail_count += 1
                 message = f"{item['proj']} API {result.get('status')}: {result.get('error_message') or ''}"
                 if self.auto_complete and not self.validate_only and can_complete_bus(result,source,self._stop or result.get('client_stopped',False)):
@@ -4846,12 +4873,12 @@ class AccessManager(QMainWindow):
         self.detail_access = QLabel('요청을 선택하세요'); self.detail_access.setWordWrap(True)
         self.detail_role = QLabel('-'); self.detail_role.setWordWrap(True)
         self.detail_name = QLabel('-'); self.detail_department = QLabel('-')
+        self.detail_name.setWordWrap(True); self.detail_department.setWordWrap(True)
         for text,widget in [('프로젝트',self.detail_project),('대상 사번',self.detail_employee),
+                            ('이름',self.detail_name),('부서',self.detail_department),
                             ('권한',self.detail_access),('Role',self.detail_role)]:
             label = QLabel(text); label.setObjectName('mutedLabel'); form.addRow(label,widget)
         detail.addLayout(form)
-        self.detail_extra = QLabel(''); self.detail_extra.setObjectName('mutedLabel'); self.detail_extra.setWordWrap(True)
-        self.detail_extra.hide(); detail.addWidget(self.detail_extra)
         self.step_icons = []; self.step_labels = []
         for index,text in enumerate(['요청 검증','그룹 권한 적용','폴더 권한 적용','BUS 완료 처리']):
             step_layout = QHBoxLayout(); step_layout.setSpacing(12)
@@ -4906,14 +4933,16 @@ class AccessManager(QMainWindow):
         self.chk_auto_complete = QCheckBox('성공 후 BUS 자동 완료'); self.chk_auto_complete.setChecked(True)
         self.chk_auto_complete.toggled.connect(lambda checked:setattr(self,'auto_complete_after_add',checked))
         self.chk_dry = QCheckBox('Dry Run',self); self.chk_dry.hide()
-        self.btn_preview = QPushButton('요청 검증'); self.btn_preview.clicked.connect(self._preview_selected)
+        self.btn_preview = QPushButton('요청 검증',self); self.btn_preview.hide()
+        # self.btn_preview.clicked.connect(self._preview_selected)
         self.btn_run_execute = QPushButton('선택 실행'); self.btn_run_execute.setObjectName('primaryButton')
         self.btn_run_execute.clicked.connect(self._execute_selected)
         self.btn_run_complete = QPushButton('BUS 완료 재확인'); self.btn_run_complete.clicked.connect(self.run_complete)
         self.btn_stop = QPushButton('중지'); self.btn_stop.setObjectName('dangerButton'); self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self._stop_all)
         actions.addWidget(self.selection_label); actions.addWidget(self.chk_auto_complete); actions.addStretch()
-        for button in (self.btn_preview,self.btn_run_execute,self.btn_run_complete,self.btn_stop):
+        # actions.addWidget(self.btn_preview)  # 선택 실행에서 자동 검증
+        for button in (self.btn_run_execute,self.btn_run_complete,self.btn_stop):
             actions.addWidget(button)
         main.addWidget(self.actions_bar)
         self.summary_label = QLabel('전체 0건 · 실행 중 0 · 완료 0 · 확인 필요 0')
@@ -5754,11 +5783,11 @@ class AccessManager(QMainWindow):
         self.current_row = row
         meta = self._row_metadata(row)
         meta.pop('show_validation',None)
-        meta['live_result'] = dict(status='validating' if dry else 'submitting')
+        meta['live_result'] = dict(status='validating')
         self._set_row_metadata(row,meta)
         self.current_seq = self.done_jobs+1
         self.current_mode = 'add' if payload['operation']=='grant' else 'remove'
-        self.table.item(row,self.COL_STATUS).setText('요청 검증 중' if dry else 'API 실행중')
+        self.table.item(row,self.COL_STATUS).setText('요청 검증 중')
         self.table.setCurrentCell(row,self.COL_PROJ)
         self._refresh_detail()
         self._log(f"API {'요청 검증' if dry else 'Job'} 요청: {payload['request_id']}",
@@ -5768,7 +5797,7 @@ class AccessManager(QMainWindow):
         thread = QThread(self)
         worker = ApiJobWorker(self._api_client(),'access',
                               dict(payload,requested_by=self._requester()) if retry_job_id else payload,
-                              dry,retry_job_id=retry_job_id,validate_only=dry)
+                              dry,retry_job_id=retry_job_id,validate_only=dry,preflight=not dry)
         self.api_thread,self.api_worker = thread,worker
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -6178,8 +6207,7 @@ class AccessManager(QMainWindow):
             meta['live_result'] = {}
             if row in retry_rows:
                 meta['_retry_parent_job_id'] = retry_rows[row]
-            if not self.chk_dry.isChecked():
-                meta['result'] = {}
+            # Keep the previous actual result if preflight blocks registration.
             self._set_row_metadata(row,meta)
             queue.append((row,payload,self.chk_dry.isChecked(),retry_rows.get(row)))
         if not queue:
@@ -6262,17 +6290,24 @@ class AccessManager(QMainWindow):
     def _on_api_progress(self, job):
         self._set_api_connection_state(True,job)
         meta = self._row_metadata(self.current_row)
-        if job.get('job_id'):
-            meta['job_id'] = job['job_id']
-            meta['live_result'] = dict(job)
-            self._set_row_metadata(self.current_row,meta)
+        if job.get('auto_validation'):
+            meta.update(validation_result=job,show_validation=False,live_result=dict(valid=True,status='submitting'))
+            self._log_validation(job,f'{self.current_row+1}행 · 실행 전 검증')
+            self.table.item(self.current_row,self.COL_STATUS).setText('API 실행중')
+        elif job.get('status')=='validating':
+            meta.update(live_result=job,show_validation=False)
+            self.table.item(self.current_row,self.COL_STATUS).setText('요청 검증 중')
+        elif job.get('job_id'):
+            meta.update(job_id=job['job_id'],live_result=dict(job),show_validation=False)
+            self.table.item(self.current_row,self.COL_STATUS).setText('API 실행중')
+        self._set_row_metadata(self.current_row,meta)
         self._set_progress_status(f"API {job.get('status','')} / {job.get('job_id','')}",
                                  self._get(self.current_row,self.COL_PROJ),self.done_jobs,self.total_jobs,running=True)
         self._refresh_detail()
 
 
     def _on_api_result(self, result):
-        self._set_api_connection_state(True,result)
+        self._set_api_connection_state(not result.get('preflight_error'),result)
         row = self.current_row
         meta = self._row_metadata(row)
         result = dict(result)
@@ -6280,8 +6315,10 @@ class AccessManager(QMainWindow):
             meta['validation_result'] = result
             meta['show_validation'] = True
             self._set_row_metadata(row,meta)
-            self.table.item(row,self.COL_STATUS).setText(validation_label(result))
+            self.table.item(row,self.COL_STATUS).setText(('실행 보류 · ' if result.get('preflight_blocked') else '')+validation_label(result))
             self._log_validation(result,f'{row+1}행 · 프로젝트 {self._get(row,self.COL_PROJ)}')
+            if result.get('preflight_blocked'):
+                self._log(result.get('message','실행 보류'))
             self.done_jobs += 1
             self._refresh_detail()
             return
@@ -6452,10 +6489,8 @@ class AccessManager(QMainWindow):
         folder = ' / '.join(x for x in (values.get('lv2'),values.get('lv3')) if x)
         self.detail_access.setText(f'{access} · {folder}' if folder else access or '요청을 선택하세요')
         self.detail_role.setText(values.get('role') or '-')
-        self.detail_name.setText(self._get(row,self.COL_NAME) if valid else '')
-        self.detail_department.setText(self._get(row,self.COL_DEPT) if valid else '')
-        extra = ' · '.join(x for x in (self.detail_name.text(),self.detail_department.text()) if x)
-        self.detail_extra.setText(extra); self.detail_extra.setVisible(bool(extra))
+        self.detail_name.setText((self._get(row,self.COL_NAME) if valid else '') or '-')
+        self.detail_department.setText((self._get(row,self.COL_DEPT) if valid else '') or '-')
         validation = meta.get('validation_result') if meta.get('show_validation') else None
         raw_steps = result.get('steps') or []
         statuses = ['queued']*4

@@ -116,7 +116,7 @@ Restart-Service FolderGrantApi
 
 ## 실제 요청 검증
 
-정식 Client의 **요청 검증**은 `/api/v1/access-jobs/validate` 또는 `/api/v1/project-jobs/validate`를 호출합니다. 본문은 해당 Job 등록과 같은 입력 모델을 사용하며 API Key가 필요합니다. 기존 `/preview`는 실행 계획 계산용으로 유지하고 실제 자원을 조회하지 않습니다.
+정식 Client는 **선택 실행의 사전 검증**으로 `/api/v1/access-jobs/validate` 또는 `/api/v1/project-jobs/validate`를 호출합니다. 본문은 해당 Job 등록과 같은 입력 모델을 사용하며 API Key가 필요합니다. 기존 `/preview`는 실행 계획 계산용으로 유지하고 실제 자원을 조회하지 않습니다.
 
 - 권한 요청: AD 사용자, 보안 그룹, 현재 직접 가입, 프로젝트 Level1·Level2·Level3, Role 대상 하위 폴더와 현재 ACL을 조회합니다. ETC는 그룹만, 종료 과제는 Closed·Archive 후보를 확인합니다.
 - 신규 프로젝트: 그룹 존재·생성 OU, 공유 경로, 프로젝트·Study, 새로 복사할 때 필요한 템플릿·Study을 확인합니다. 기본 All 폴더는 별도 검증에서 제외합니다. 새 그룹·프로젝트 폴더가 없으면 생성 예정으로 표시하며 기존 자원 재사용 시 불필요한 템플릿·OU 검사를 생략합니다.

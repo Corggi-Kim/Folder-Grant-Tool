@@ -52,10 +52,30 @@ class DesignTests(unittest.TestCase):
         self.assertEqual(w._row_values(row)['lv2'],'Study')
         self.assertEqual(w._row_values(row)['lv3'],'DM')
 
+    def test_access_name_and_department_follow_employee_and_clear_with_selection(self):
+        w=self.window
+        row=self.fixture.row()
+        w.table.item(row,w.COL_NAME).setText('샘플 사용자')
+        w.table.item(row,w.COL_DEPT).setText('시험 부서')
+        w.table.setCurrentCell(row,w.COL_PROJ);w._refresh_detail()
+        self.assertEqual(w.detail_name.text(),'샘플 사용자')
+        self.assertEqual(w.detail_department.text(),'시험 부서')
+        form=w.detail_employee.parentWidget().layout().itemAt(1).layout()
+        self.assertEqual([form.labelForField(widget).text() for widget in
+                         [w.detail_project,w.detail_employee,w.detail_name,w.detail_department,w.detail_access,w.detail_role]],
+                         ['프로젝트','대상 사번','이름','부서','권한','Role'])
+        self.assertLess(form.indexOf(w.detail_employee),form.indexOf(w.detail_name))
+        self.assertLess(form.indexOf(w.detail_name),form.indexOf(w.detail_department))
+        self.assertLess(form.indexOf(w.detail_department),form.indexOf(w.detail_access))
+        w.table.setRowCount(0);w._refresh_detail()
+        self.assertEqual(w.detail_name.text(),'-')
+        self.assertEqual(w.detail_department.text(),'-')
+
     def test_preview_and_execute_route_to_same_existing_job_flow(self):
         w = self.window
         w.run_execute = Mock()
-        w.btn_preview.click()
+        self.assertTrue(w.btn_preview.isHidden())
+        w._preview_selected()
         self.assertTrue(w.chk_dry.isChecked())
         w.run_execute.assert_called_once()
         w.run_execute.reset_mock()
@@ -195,7 +215,7 @@ class DesignTests(unittest.TestCase):
         self.show()
         v = w._newdlg
         pos = lambda widget:widget.mapTo(w,self.m.QPoint(0,0))
-        self.assertEqual(v.btn_refresh.text(),'BUS 신규조회')
+        self.assertEqual(v.btn_refresh.text(),'BUS 신규 조회')
         self.assertEqual(v.btn_manual.text(),'수동 추가')
         self.assertEqual(v.btn_create.text(),'선택 실행')
         self.assertFalse(hasattr(v,'btn_close'))
@@ -206,7 +226,7 @@ class DesignTests(unittest.TestCase):
         self.assertFalse(v.btn_stop.isEnabled())
         self.assertEqual(v.btn_preview.text(),'요청 검증')
         self.assertFalse(hasattr(v,'chk_dry'))
-        self.assertLess(pos(v.btn_preview).x(),pos(v.btn_create).x())
+        self.assertTrue(v.btn_preview.isHidden())
         w.tabs.setCurrentIndex(0)
         self.assertTrue(v.actions_bar.isHidden())
 

@@ -99,8 +99,8 @@ class ProjectDetailTests(unittest.TestCase):
 
     def test_detail_fields_are_filtered_without_discarding_bus_identity(self):
         v=self.viewer()
-        header=['프로젝트코드','프로젝트명','폴더경로','요청자사번','요청자성명','요청자부서/팀','요청일','요청번호','승인자','기타']
-        values=['26012','First',r'\\server\share\26012','E1','Tester','DM','2026-10-26','BUS-123','Manager','keep']
+        header=['프로젝트코드','프로젝트명','폴더경로','요청자사번','요청자성명','요청자부서/팀','요청일','요청번호','승인자','요청자직책','기타']
+        values=['26012','First',r'\\server\share\26012','E1','Tester','DM','2026-10-26','BUS-123','Manager','팀장','keep']
         v.set_data(header,[values]);v._refresh_project_detail()
         item=v.tbl.item(0,v._hidx['프로젝트코드']);identity=item.data(self.m.Qt.UserRole)['request_id']
         self.assertEqual(set(v.detail_values),{'프로젝트코드','프로젝트명','경로','요청자사번','요청자성명','요청자부서/팀'})
