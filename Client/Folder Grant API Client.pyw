@@ -4846,12 +4846,12 @@ class AccessManager(QMainWindow):
         self.detail_access = QLabel('요청을 선택하세요'); self.detail_access.setWordWrap(True)
         self.detail_role = QLabel('-'); self.detail_role.setWordWrap(True)
         self.detail_name = QLabel('-'); self.detail_department = QLabel('-')
+        self.detail_name.setWordWrap(True); self.detail_department.setWordWrap(True)
         for text,widget in [('프로젝트',self.detail_project),('대상 사번',self.detail_employee),
+                            ('이름',self.detail_name),('부서',self.detail_department),
                             ('권한',self.detail_access),('Role',self.detail_role)]:
             label = QLabel(text); label.setObjectName('mutedLabel'); form.addRow(label,widget)
         detail.addLayout(form)
-        self.detail_extra = QLabel(''); self.detail_extra.setObjectName('mutedLabel'); self.detail_extra.setWordWrap(True)
-        self.detail_extra.hide(); detail.addWidget(self.detail_extra)
         self.step_icons = []; self.step_labels = []
         for index,text in enumerate(['요청 검증','그룹 권한 적용','폴더 권한 적용','BUS 완료 처리']):
             step_layout = QHBoxLayout(); step_layout.setSpacing(12)
@@ -6452,10 +6452,8 @@ class AccessManager(QMainWindow):
         folder = ' / '.join(x for x in (values.get('lv2'),values.get('lv3')) if x)
         self.detail_access.setText(f'{access} · {folder}' if folder else access or '요청을 선택하세요')
         self.detail_role.setText(values.get('role') or '-')
-        self.detail_name.setText(self._get(row,self.COL_NAME) if valid else '')
-        self.detail_department.setText(self._get(row,self.COL_DEPT) if valid else '')
-        extra = ' · '.join(x for x in (self.detail_name.text(),self.detail_department.text()) if x)
-        self.detail_extra.setText(extra); self.detail_extra.setVisible(bool(extra))
+        self.detail_name.setText((self._get(row,self.COL_NAME) if valid else '') or '-')
+        self.detail_department.setText((self._get(row,self.COL_DEPT) if valid else '') or '-')
         validation = meta.get('validation_result') if meta.get('show_validation') else None
         raw_steps = result.get('steps') or []
         statuses = ['queued']*4

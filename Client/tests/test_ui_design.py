@@ -52,6 +52,25 @@ class DesignTests(unittest.TestCase):
         self.assertEqual(w._row_values(row)['lv2'],'Study')
         self.assertEqual(w._row_values(row)['lv3'],'DM')
 
+    def test_access_name_and_department_follow_employee_and_clear_with_selection(self):
+        w=self.window
+        row=self.fixture.row()
+        w.table.item(row,w.COL_NAME).setText('샘플 사용자')
+        w.table.item(row,w.COL_DEPT).setText('시험 부서')
+        w.table.setCurrentCell(row,w.COL_PROJ);w._refresh_detail()
+        self.assertEqual(w.detail_name.text(),'샘플 사용자')
+        self.assertEqual(w.detail_department.text(),'시험 부서')
+        form=w.detail_employee.parentWidget().layout().itemAt(1).layout()
+        self.assertEqual([form.labelForField(widget).text() for widget in
+                         [w.detail_project,w.detail_employee,w.detail_name,w.detail_department,w.detail_access,w.detail_role]],
+                         ['프로젝트','대상 사번','이름','부서','권한','Role'])
+        self.assertLess(form.indexOf(w.detail_employee),form.indexOf(w.detail_name))
+        self.assertLess(form.indexOf(w.detail_name),form.indexOf(w.detail_department))
+        self.assertLess(form.indexOf(w.detail_department),form.indexOf(w.detail_access))
+        w.table.setRowCount(0);w._refresh_detail()
+        self.assertEqual(w.detail_name.text(),'-')
+        self.assertEqual(w.detail_department.text(),'-')
+
     def test_preview_and_execute_route_to_same_existing_job_flow(self):
         w = self.window
         w.run_execute = Mock()
