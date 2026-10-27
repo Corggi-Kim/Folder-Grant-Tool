@@ -2,7 +2,7 @@
 
 권한 부여·해제와 신규 프로젝트 생성을 처리하는 독립 API 서버입니다. 현재 패키지 버전은 **0.4.0**입니다. BUS 조회·완료는 [정식 Client](../Client/README.md)가 담당하고, API는 AD·폴더 권한 실행과 작업 이력을 관리합니다. 기존 `Folder Grant Tool_v3.3.5.pyw`는 수정하지 않습니다.
 
-현재 베타 구현은 Preview/Job API와 선택 가능한 Mock 또는 PowerShell 실행기를 제공합니다. 입력값을 검증한 뒤 대상 AD 그룹, 폴더 경로와 실행 계획을 만들고 SQLite에 작업 이력을 저장합니다.
+현재 구현은 실제 자원 검증·Preview·Job API와 Mock/PowerShell 실행기를 제공합니다. 안내 기준은 2026-10-27 `main b09100d2e6d5`입니다. 입력값을 검증한 뒤 대상 AD 그룹, 폴더 경로와 실행 계획을 만들고 SQLite에 작업 이력을 저장합니다.
 
 > **주의:** 기본값은 `mock`이며 외부 시스템을 변경하지 않습니다. `powershell` 모드는 실제 AD 및 폴더 ACL을 변경하므로 오픈 전 테스트 계정·그룹·폴더에서 먼저 검증하십시오.
 
@@ -40,6 +40,7 @@ pytest
 | `GET` | `/api/v1/access-jobs/{job_id}` | 작업과 단계별 상태 조회 |
 | `GET` | `/api/v1/access-jobs/by-request/{request_id}` | 요청번호로 작업 조회 |
 | `POST` | `/api/v1/access-jobs/{job_id}/cancel` | 대기/실행 중 작업 취소 요청 |
+| `POST` | `/api/v1/access-jobs/prepare-group` | 명시적 동의 후 누락 Isolated 그룹·기본 RX 준비, 별도 Job |
 | `POST` | `/api/v1/access-jobs/{job_id}/retry` | 실제 실패·부분 성공 권한 Job의 미완료 단계 재실행 |
 | `POST` | `/api/v1/project-jobs/preview` | 신규 프로젝트 그룹·폴더 생성 계획 확인 |
 | `POST` | `/api/v1/project-jobs/validate` | 그룹·생성 위치·템플릿 구조·기존 폴더 읽기 전용 검증 |
@@ -116,10 +117,10 @@ Restart-Service FolderGrantApi
 
 ## 실제 요청 검증
 
-정식 Client는 **선택 실행의 사전 검증**으로 `/api/v1/access-jobs/validate` 또는 `/api/v1/project-jobs/validate`를 호출합니다. 본문은 해당 Job 등록과 같은 입력 모델을 사용하며 API Key가 필요합니다. 기존 `/preview`는 실행 계획 계산용으로 유지하고 실제 자원을 조회하지 않습니다.
+정식 Client의 **권한 요청 선택 실행**은 `/api/v1/access-jobs/validate`를 먼저 호출하고 실제 검증이 통과한 경우에만 등록·재실행합니다. **신규 프로젝트 선택 실행은 사전 검증 없이 `/api/v1/project-jobs`를 바로 등록**합니다. `/api/v1/project-jobs/validate`는 개발·진단용 API로 유지하며 사용자 실행을 차단하는 선행 조건이 아닙니다. 본문은 해당 Job 등록과 같은 입력 모델을 사용하며 API Key가 필요합니다. 기존 `/preview`는 실행 계획 계산용으로 유지하고 실제 자원을 조회하지 않습니다.
 
 - 권한 요청: AD 사용자, 보안 그룹, 현재 직접 가입, 프로젝트 Level1·Level2·Level3, Role 대상 하위 폴더와 현재 ACL을 조회합니다. ETC는 그룹만, 종료 과제는 Closed·Archive 후보를 확인합니다.
-- 신규 프로젝트: 그룹 존재·생성 OU, 공유 경로, 프로젝트·Study, 새로 복사할 때 필요한 템플릿·Study을 확인합니다. 기본 All 폴더는 별도 검증에서 제외합니다. 새 그룹·프로젝트 폴더가 없으면 생성 예정으로 표시하며 기존 자원 재사용 시 불필요한 템플릿·OU 검사를 생략합니다.
+- 신규 프로젝트 개발용 검증 API: 그룹 존재·생성 OU, 공유 경로, 프로젝트·Study, 새로 복사할 때 필요한 템플릿·Study을 확인합니다. 기본 All 폴더는 별도 검증에서 제외합니다. 새 그룹·프로젝트 폴더가 없으면 생성 예정으로 표시하며 기존 자원 재사용 시 불필요한 템플릿·OU 검사를 생략합니다.
 - 검증은 **API 서비스 계정**으로 읽기 전용 수행합니다. AD·ACL 변경, 파일 생성·삭제·복사, Job 등록과 BUS 완료는 하지 않습니다.
 - Mock 모드는 실제 조회를 하지 않고 `unknown`과 안내를 반환합니다. PowerShell 모드에서도 검증 경로는 읽기 전용입니다.
 - 응답은 `validation_status`(passed / failed / warning / unknown), `checked_at`, `checked_by`, `checks`와 `warnings`를 반환합니다. 각 checks에는 id·label·target·status·message가 있으며 해당 없는 검사는 not_applicable입니다. 대상 없음과 접근·조회 실패를 구분합니다.
@@ -127,7 +128,7 @@ Restart-Service FolderGrantApi
 
 `FGT_VALIDATION_TIMEOUT_SECONDS=20`은 검증 전체 PowerShell 조회의 제한입니다(1~25초). 실제 작업의 단계당 10800초와 별도이며 Client HTTP 30초보다 짧게 제한합니다. 제한 초과·응답 이상은 확인 불가로 처리합니다. 전체 파일 트리를 재귀 검사하지 않습니다.
 
-API와 Client를 함께 업데이트하고 서비스를 재시작하세요. 구버전 서버에는 검증 API가 없어 Client에서 업데이트 안내를 표시합니다. 이 기능은 DB 스키마 변경이 없습니다. 최신 운영 Word·PPT는 docs/에 있으며 기존 사용자 수정 베타본은 보존합니다.
+API와 Client를 함께 업데이트하고 서비스를 재시작하세요. 구버전 서버에는 검증 API가 없어 Client에서 업데이트 안내를 표시합니다. 이 기능은 DB 스키마 변경이 없습니다. 현재 동작은 docs/CURRENT_BEHAVIOR.md를 참고하고, Word·PPT는 작성 당시 기준 자료로 구분합니다. 사용자가 수정한 Office 파일은 자동 재생성하지 않습니다.
 
 ## Windows 서비스 등록
 
@@ -204,7 +205,7 @@ Get-Content .\logs\service.log -Tail 100
 5. `Study/All`에 그룹 수정 권한 적용
 6. 그룹·폴더·기본 ACL 재검증
 
-그룹과 폴더가 이미 존재하면 재사용하므로 같은 프로젝트에 대해 다시 실행할 수 있습니다. `robocopy` 종료 코드는 `0~7`을 정상 범위로 처리하고 `8 이상`을 실패로 처리합니다. 실제 실행 전에는 `/api/v1/project-jobs/validate`로 실제 생성 준비 상태를 확인하십시오. `/preview`는 개발용 실행 계획 계산이며 실제 조회를 대신하지 않습니다.
+그룹과 폴더가 이미 존재하면 재사용하므로 같은 프로젝트에 대해 다시 실행할 수 있습니다. `robocopy` 종료 코드는 `0~7`을 정상 범위로 처리하고 `8 이상`을 실패로 처리합니다. 정식 Client는 이 생성 Job을 바로 등록합니다. 생성 중 각 단계와 마지막 `verify_project_creation`으로 결과를 확인하며, 개발자가 필요할 때만 `/validate`·`/preview`를 별도로 사용합니다.
 
 ## 수동 테스트 클라이언트
 
@@ -230,7 +231,7 @@ python -m test_client.main
 
 ## 오픈·운영 인수 기록
 
-2026-10-26 `main ebbdfb9d4b8f` 기준 자동 시험은 **76개 통과·선택 PowerShell 시험 5개 건너뜀**입니다. 선택 시험은 `FGT_TEST_POWERSHELL`에 인터프리터를 지정해야 실행되며 실제 AD·SMB 변경을 대신하지 않습니다.
+2026-10-27 `main b09100d2e6d5` 기준 자동 시험은 **98개 통과·선택 PowerShell 시험 6개 건너뜀**입니다. 선택 시험은 `FGT_TEST_POWERSHELL`에 인터프리터를 지정해야 실행되며 실제 AD·SMB 변경을 대신하지 않습니다.
 
 [오픈·운영 인수인계 Word](../docs/오픈_운영_인수인계.docx)에 서비스 계정·환경·백업·실제 시험·승인·문의·중단 기준을 기록합니다. 비밀값은 문서에 넣지 않습니다. API Key를 가진 호출자의 `requested_by`가 신뢰 가능한 개인 인증 정보는 아니므로 사용자별 권한이 필요한 범위로 확대할 때는 인증 구조를 보완해야 합니다.
 
