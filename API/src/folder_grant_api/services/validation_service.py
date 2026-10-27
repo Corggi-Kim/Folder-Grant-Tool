@@ -32,6 +32,13 @@ def access_probes(payload, plan, settings):
         return checks
     checks.extend([probe('group', '프로젝트 보안 그룹', plan.target_group, 'group'),
                    probe('membership', '현재 그룹 직접 가입', plan.target_group, 'membership', parents=['user', 'group'])])
+    if preparation_scope(payload):
+        root, isolated = preparation_paths(payload, settings)
+        checks.extend([{**p, 'when_group_missing': True} for p in [
+            probe('ou', '그룹 생성 OU', settings.group_ou_path, 'ou'),
+            share_probe(root, 'preparation_share'),
+            probe('preparation_root', '프로젝트 루트', root, parent='preparation_share'),
+            probe('preparation_isolated', 'Isolated 루트', isolated, parent='preparation_root')]])
     if (payload.level3 or '').upper() == 'ETC':
         checks.append(probe('etc', '폴더 검사', '', 'not_applicable', message='ETC는 그룹 작업만 수행합니다.'))
         return checks
@@ -95,6 +102,9 @@ function AclInfo($path) {
     return ($matches -join '; ')
 }
 foreach ($p in $spec.probes) {
+    if ($p.when_group_missing -and $states['group'] -ne 'failed') {
+        Record $p 'not_applicable' '그룹 누락 시에만 생성 준비를 검사합니다.' $null; continue
+    }
     if ($p.when_missing) {
         if ($states[$p.when_missing] -notin @('passed','warning')) { Record $p 'unknown' '선행 대상 확인 불가' $null; continue }
         if ($objects[$p.when_missing]) { Record $p 'not_applicable' '기존 자원 재사용: 생성 준비 검사 불필요' $null; continue }
@@ -214,3 +224,45 @@ def validate_resources(request_id, probes, settings):
         return response(checks, raw.get('checked_by'))
     except Exception as exc:
         return unavailable(f'실제 조회를 완료하지 못했습니다: {exc}')
+
+
+def preparation_scope(payload):
+    return (payload.operation == 'grant' and payload.project_status == 'progress'
+            and (payload.level2 or '').lower() == 'isolated')
+
+
+def preparation_paths(payload, settings):
+    root = settings.share_root.format(proj_seg=project_segment_for_folder(payload.project_code), lv2='', lv3='').rstrip('\\')
+    isolated = settings.share_root.format(proj_seg=project_segment_for_folder(payload.project_code), lv2='Isolated', lv3='').rstrip('\\')
+    return root, isolated
+
+
+def with_group_preparation(payload, plan, settings, result):
+    """Offer only on an unambiguous missing group with every prerequisite readable."""
+    from folder_grant_api.schemas.validation import GroupPreparation
+    if settings.executor_mode != 'powershell' or not preparation_scope(payload):
+        return result
+    checks = {c.id: c for c in result.checks}
+    required = {'user', 'group', 'membership', 'ou', 'preparation_share', 'preparation_root', 'preparation_isolated'}
+    if not required.issubset(checks):
+        return result
+    if any(checks[id].status != 'passed' for id in required - {'group', 'membership'}):
+        return result
+    group = checks['group']
+    if group.status != 'failed' or group.message != '대상 없음':
+        return result
+    for c in result.checks:
+        if c.id == 'group':
+            continue
+        if c.id == 'membership' and c.status == 'unknown' and c.message == '선행 대상이 없거나 확인되지 않아 검사하지 못했습니다.':
+            continue
+        if c.status not in {'passed', 'not_applicable'}:
+            return result
+    root, isolated = preparation_paths(payload, settings)
+    result.group_preparation = GroupPreparation(group_name=plan.target_group, root_path=root, isolated_path=isolated)
+    return result
+
+
+def validate_access_resources(payload, plan, settings):
+    result = validate_resources(payload.request_id, access_probes(payload, plan, settings), settings)
+    return with_group_preparation(payload, plan, settings, result)

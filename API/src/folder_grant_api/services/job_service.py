@@ -56,7 +56,7 @@ class JobService:
 
     def retry(self,job_id: str,actor: str,executor_mode: str):
         parent = self.get(job_id)
-        if (parent.operation not in {"grant","revoke"} or parent.status not in {"failed","partially_succeeded"}
+        if (parent.request_payload.get("confirm_group_creation") or parent.operation not in {"grant","revoke"} or parent.status not in {"failed","partially_succeeded"}
                 or executor_mode!="powershell" or (parent.result_payload or {}).get("executor_mode")!="powershell"):
             raise JobNotRetryableError(parent.status)
         return self.repository.create_retry(parent,actor)

@@ -109,3 +109,7 @@ class CancelJobRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
     requested_by: str = Field(min_length=1, max_length=100)
+
+
+class PrepareGroupRequest(AccessJobRequest):
+    confirm_group_creation: Literal[True]
