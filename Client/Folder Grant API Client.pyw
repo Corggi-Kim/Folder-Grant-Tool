@@ -3149,13 +3149,10 @@ class NewItemsViewer(QDialog):
         body = QWidget(); body.setObjectName('projectDetailBody'); body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(0,0,0,0); body_layout.setSpacing(12)
         body_layout.addWidget(fields)
-        process_title = QLabel('처리 진행'); process_title.setObjectName('sectionTitle')
-        body_layout.addWidget(process_title)
         self.project_step_icons = []; self.project_step_labels = []
         self.project_step_types = ['request','ensure_ad_group','ensure_project_folder','cleanup_unknown_acl',
                                    'grant_project_root_acl','grant_study_all_acl','verify_project_creation','bus']
-        self.project_step_names = ['요청 확인','보안 그룹 준비','프로젝트 폴더 준비','기본 ACL 정리',
-                                   '프로젝트 권한 적용','기본 폴더 권한 적용','생성 결과 확인','BUS 완료 처리']
+        self.project_step_names = ['보안 그룹 생성','프로젝트 폴더 생성','권한 적용','BUS 완료 처리']
         stages = QWidget(); stages.setObjectName('projectProcess'); stage_layout = QVBoxLayout(stages); stage_layout.setContentsMargins(0,0,0,0); stage_layout.setSpacing(9)
         for index,name in enumerate(self.project_step_names):
             row_layout = QHBoxLayout(); row_layout.setContentsMargins(0,0,0,0); row_layout.setSpacing(12)
@@ -3178,7 +3175,7 @@ class NewItemsViewer(QDialog):
         self.detail_result.setTextFormat(Qt.PlainText)
         self.detail_result_scroll = QScrollArea(); self.detail_result_scroll.setObjectName('projectResultScroll'); self.detail_result_scroll.setWidgetResizable(True)
         self.detail_result_scroll.setFrameShape(QScrollArea.NoFrame)
-        self.detail_result_scroll.setMinimumHeight(90); self.detail_result_scroll.setMaximumHeight(120)
+        self.detail_result_scroll.setMinimumHeight(60); self.detail_result_scroll.setMaximumHeight(90)
         self.detail_result.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
         self.detail_result_scroll.setWidget(self.detail_result)
         detail.addWidget(self.detail_result_scroll)
@@ -3222,6 +3219,7 @@ class NewItemsViewer(QDialog):
         self.tbl.model().rowsRemoved.connect(self._refresh_selection)
         self.tbl.model().modelReset.connect(self._refresh_selection)
         self._refresh_selection()
+        self._refresh_project_detail()
 
     def _refresh_selection(self, *args):
         selected = sum(self._is_row_checked(row) for row in range(self.tbl.rowCount()))
@@ -3505,25 +3503,25 @@ class NewItemsViewer(QDialog):
 
     def _refresh_project_process(self, meta, job):
         steps = {step.get('type'):step for step in (job.get('steps') or []) if isinstance(step,dict)}
-        states = ['queued']*8
         names = list(self.project_step_names)
-        if job.get('job_id'):
-            states[0] = 'succeeded'
+        def phase(kinds):
+            values = [steps.get(kind,{}).get('status','queued') for kind in kinds]
+            if job.get('executor_mode')=='mock':
+                values = ['simulated' if value in {'succeeded','simulated'} else value for value in values]
+            if 'failed' in values: return 'failed'
+            if 'running' in values: return 'running'
+            if 'cancelled' in values: return 'cancelled'
+            if 'skipped' in values: return 'skipped'
+            if all(value=='succeeded' for value in values): return 'succeeded'
+            if all(value in {'succeeded','simulated'} for value in values): return 'simulated'
+            if any(value in {'succeeded','simulated'} for value in values) and job.get('status')=='running': return 'running'
+            return 'queued'
+        states = [phase(['ensure_ad_group']),phase(['ensure_project_folder']),
+                  phase(['cleanup_unknown_acl','grant_project_root_acl','grant_study_all_acl','verify_project_creation']),
+                  'queued']
+        for index,state in enumerate(states):
+            if state=='simulated': names[index] += ' · 모의 실행'
         action = meta.get('project_action')
-        if action in {'validating','submitting'}:
-            states[0] = 'running'
-        validation = meta.get('validation_result') if meta.get('show_validation') else None
-        if validation:
-            names[0] = '요청 검증'
-            states[0] = {'passed':'succeeded','failed':'failed','warning':'warning','unknown':'warning'}.get(validation.get('validation_status'),'queued')
-        if action == 'validating':
-            names[0] = '요청 검증'
-        for index,kind in enumerate(self.project_step_types[1:-1],1):
-            step = steps.get(kind,{})
-            state = step.get('status','queued')
-            if job.get('executor_mode')=='mock' and state in {'succeeded','simulated'}:
-                state = 'simulated'; names[index] += ' · 모의 실행'
-            states[index] = state if state in {'succeeded','running','failed','cancelled','skipped','simulated'} else 'queued'
         if meta.get('bus_done') and meta.get('source')=='bus':
             states[-1] = 'succeeded'
         elif meta and meta.get('source')!='bus':
@@ -3571,14 +3569,14 @@ class NewItemsViewer(QDialog):
         steps = {step.get('type'):step for step in (job.get('steps') or []) if isinstance(step,dict)}
         if row>=0:
             self._update_project_path(row,job)
-            fields = list(getattr(self,'_hidx',{}).items())
-            for kind,label in [('code','프로젝트코드'),('name','프로젝트명'),('path','경로'),('requester','요청자')]:
-                matched = [(name,column) for name,column in fields if self._project_field_kind(name)==kind]
-                if not matched:
-                    add_field(self.detail_form,label,'-')
-                for name,column in matched:
-                    item = self.tbl.item(row,column)
-                    add_field(self.detail_form,label if kind!='requester' else name,item.text() if item else '-')
+        fields = list(getattr(self,'_hidx',{}).items())
+        for kind,label in [('code','프로젝트코드'),('name','프로젝트명'),('path','경로'),('requester','요청자')]:
+            matched = [(name,column) for name,column in fields if self._project_field_kind(name)==kind]
+            if not matched:
+                add_field(self.detail_form,label,'-')
+            for name,column in matched:
+                item = self.tbl.item(row,column) if row>=0 else None
+                add_field(self.detail_form,label if kind!='requester' else name,item.text() if item else '-')
         result = (meta.get('validation_result') or {}) if meta.get('show_validation') else job
         if row<0:
             self.detail_result.setText('요청을 선택하세요')

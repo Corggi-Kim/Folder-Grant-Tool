@@ -34,10 +34,10 @@ class ValidationTests(unittest.TestCase):
         self.assertTrue(w.step_icons[2].spinner.timer.isActive())
         v=self.m.NewItemsViewer(w);v.show();self.app.processEvents()
         v._refresh_project_process(dict(project_action='running'),dict(job_id='p',steps=[dict(type='ensure_project_folder',status='running')]))
-        self.assertEqual(v.project_step_icons[2].property('state'),'running')
-        self.assertTrue(v.project_step_icons[2].spinner.timer.isActive())
+        self.assertEqual(v.project_step_icons[1].property('state'),'running')
+        self.assertTrue(v.project_step_icons[1].spinner.timer.isActive())
         v._refresh_project_process({},dict(job_id='p',steps=[dict(type='ensure_project_folder',status='succeeded')]))
-        self.assertFalse(v.project_step_icons[2].spinner.timer.isActive())
+        self.assertFalse(v.project_step_icons[1].spinner.timer.isActive())
         v.close()
 
     def test_live_worker_never_registers_or_uses_preview_or_recovers_by_request(self):

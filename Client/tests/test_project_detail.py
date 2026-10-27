@@ -25,34 +25,34 @@ class ProjectDetailTests(unittest.TestCase):
         meta=item.data(self.m.Qt.UserRole);meta['result']=dict(job_id='old',status='failed',executor_mode='powershell');item.setData(self.m.Qt.UserRole,meta)
         live=self.job(v,['succeeded','running','queued','queued','queued','queued'])
         v._on_project_progress(0,live)
-        self.assertEqual(self.states(v),['succeeded','succeeded','running','queued','queued','queued','queued','queued'])
+        self.assertEqual(self.states(v),['succeeded','running','queued','queued'])
         self.assertEqual(item.data(self.m.Qt.UserRole)['result']['job_id'],'old')
         self.assertEqual(v.detail_values['경로'].text(),'target-ensure_project_folder')
         self.assertEqual(set(v.detail_values),{'프로젝트코드','프로젝트명','경로','신청자'})
         self.assertIn('현재 단계',v.detail_result.text())
         v.tbl.setCurrentCell(1,v._hidx['프로젝트코드']);self.app.processEvents()
-        self.assertEqual(self.states(v),['queued']*8)
+        self.assertEqual(self.states(v),['queued']*4)
         v.tbl.setCurrentCell(0,v._hidx['프로젝트코드']);self.app.processEvents()
-        self.assertEqual(self.states(v)[2],'running')
+        self.assertEqual(self.states(v)[1],'running')
 
     def test_partial_failure_skipped_steps_and_bus_outcome_are_distinct(self):
         v=self.viewer();result=self.job(v,['succeeded','failed','skipped','skipped','skipped','skipped'])
         result.update(status='partially_succeeded',error_code='PATH_NOT_FOUND',error_message='Missing project folder')
         v._on_project_result(0,result)
-        self.assertEqual(self.states(v)[1:4],['succeeded','failed','skipped'])
+        self.assertEqual(self.states(v)[:3],['succeeded','failed','skipped'])
         self.assertEqual(self.states(v)[-1],'queued')
         self.assertIn('Missing project folder',v.detail_result.text())
         result=self.job(v,['succeeded']*6);result.update(status='succeeded',bus_done=True)
         v._on_project_result(0,result)
-        self.assertEqual(self.states(v),['succeeded']*8)
+        self.assertEqual(self.states(v),['succeeded']*4)
 
     def test_validation_and_mock_never_claim_actual_creation_or_bus_completion(self):
         v=self.viewer()
         v._on_project_result(0,dict(status='validated',validation_status='passed',checks=[]))
-        self.assertEqual(self.states(v),['succeeded']+['queued']*7)
+        self.assertEqual(self.states(v),['queued']*4)
         result=self.job(v,['simulated']*6);result.update(status='simulated',executor_mode='mock')
         v._on_project_result(0,result)
-        self.assertEqual(self.states(v)[1:-1],['simulated']*6)
+        self.assertEqual(self.states(v)[:-1],['simulated']*3)
         self.assertEqual(self.states(v)[-1],'queued')
         self.assertIn('모의 실행',v.project_step_labels[1].text())
 
@@ -114,3 +114,26 @@ class ProjectDetailTests(unittest.TestCase):
         v._toggle_detail_columns(False)
         self.assertTrue(v.tbl.isColumnHidden(v._hidx['폴더경로']))
         self.assertFalse(v.tbl.isColumnHidden(v._status_col))
+
+    def test_empty_view_and_deleted_selection_keep_fields_and_four_stages(self):
+        w=self.window;w._ensure_project_viewer();v=w._newdlg
+        self.assertEqual(set(v.detail_values),{'프로젝트코드','프로젝트명','경로','요청자'})
+        self.assertTrue(all(field.text()=='-' for field in v.detail_values.values()))
+        self.assertEqual([label.text() for label in v.project_step_labels],['보안 그룹 생성','프로젝트 폴더 생성','권한 적용','BUS 완료 처리'])
+        self.assertEqual(self.states(v),['queued']*4)
+        v._manual_add('26012','Example');v.tbl.setRowCount(0);v._refresh_project_detail()
+        self.assertEqual(len(v.detail_values),4)
+        self.assertTrue(all(field.text()=='-' for field in v.detail_values.values()))
+        self.assertEqual(self.states(v),['queued']*4)
+
+    def test_permission_phase_requires_all_actual_substeps_including_verification(self):
+        v=self.viewer()
+        for phase,expected in [(['running','queued','queued','queued'],'running'),
+                               (['succeeded','succeeded','succeeded','running'],'running'),
+                               (['succeeded','succeeded','succeeded','failed'],'failed'),
+                               (['succeeded']*4,'succeeded')]:
+            result=self.job(v,['succeeded','succeeded']+phase)
+            v._on_project_progress(0,result)
+            self.assertEqual(self.states(v)[2],expected)
+        v._on_project_progress(0,dict(status='validating'))
+        self.assertEqual(self.states(v),['queued']*4)
