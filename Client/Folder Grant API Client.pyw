@@ -36,8 +36,8 @@ from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QTim
 from openpyxl import load_workbook
 
 APP_NAME = "Folder Grant API Client"
-APP_VERSION = "1.1.0"  #구조변경, 기능추가/수정, 오류/버그수정
-APP_BUILD = "2026-10-22"
+APP_VERSION = "1.1.1"  #구조변경, 기능추가/수정, 오류/버그수정
+APP_BUILD = "2026-10-29"
 APP_VERSION_STR = f"v{APP_VERSION}"
 
 THEMES = {'light': {'bg': '#f4f6fa',
@@ -5951,8 +5951,7 @@ class AccessManager(QMainWindow):
         for check in result.get('checks',[]):
             target = f" · {check['target']}" if check.get('target') else ''
             self._log(f"{symbols.get(check.get('status'),'?')} {check.get('label','검사')}{target}: {check.get('message','')}")
-        for warning in result.get('warnings',[]):
-            self._log('안내: '+warning)
+        # 검증 범위 안내는 위 상세 JSON 로그에 보존하고 화면에는 반복하지 않습니다.
 
     @staticmethod
     def _api_log_summary(result,context):

@@ -48,7 +48,8 @@ def test_new_project_checks_creation_prerequisites_and_allows_absent_targets():
 
 
 def test_script_distinguishes_unknown_and_missing_and_does_not_recurse():
-    assert 'ADIdentityNotFoundException|ItemNotFoundException' in READ_ONLY_SCRIPT
+    assert 'IsAdIdentityMissing $err' in READ_ONLY_SCRIPT
+    assert 'ItemNotFoundException' in READ_ONLY_SCRIPT
     assert '선행 대상이 없거나 확인되지 않아' in READ_ONLY_SCRIPT
     assert '-Recurse' not in READ_ONLY_SCRIPT
 

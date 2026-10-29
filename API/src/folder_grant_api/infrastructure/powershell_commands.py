@@ -1,4 +1,5 @@
 from typing import TYPE_CHECKING, Any
+from folder_grant_api.infrastructure.powershell_errors import AD_IDENTITY_MISSING_FUNCTION
 
 if TYPE_CHECKING:
     from folder_grant_api.infrastructure.models import JobStepRecord
@@ -227,11 +228,11 @@ def _require_folder(path):
 def _prepare_isolated_group(step):
     details = step.details or {}
     guards = ''.join(_require_folder(path) for path in details['required_paths'])
-    return (guards +
+    return (AD_IDENTITY_MISSING_FUNCTION + guards +
         "$group=$null;"
         "try {"
         f"$group=Get-ADGroup -Identity {quote(step.target)} -ErrorAction Stop;"
-        "} catch { if ($_.Exception.GetType().FullName -notmatch 'ADIdentityNotFoundException') { throw } };"
+        "} catch { if (-not (IsAdIdentityMissing $_)) { throw } };"
         "if ($group) {"
         "if ([string]$group.GroupCategory -ne 'Security') { throw 'GROUP_NOT_SECURITY' };"
         "Write-Output 'GROUP_EXISTS';"
