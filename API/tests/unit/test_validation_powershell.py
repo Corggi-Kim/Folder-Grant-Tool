@@ -76,7 +76,7 @@ def project():
 def test_access_real_script_with_resources_present():
     probes,paths=access();checks=run_script(probes,paths)
     assert all(c['status']=='passed' for c in checks.values())
-    assert '직접 가입' in checks['membership']['message']
+    assert checks['membership']['message'] == '그룹에 등록되어 있습니다.'
 
 
 def test_missing_level3_vs_unreadable_share():

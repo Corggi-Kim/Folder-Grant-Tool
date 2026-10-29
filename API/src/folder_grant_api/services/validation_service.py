@@ -31,7 +31,7 @@ def access_probes(payload, plan, settings):
         checks.append(probe('closed_acl', '종료 폴더 현재 ACL', plan.target_paths[0], 'acl', parent='closed'))
         return checks
     checks.extend([probe('group', '프로젝트 보안 그룹', plan.target_group, 'group'),
-                   probe('membership', '현재 그룹 직접 가입', plan.target_group, 'membership', parents=['user', 'group'])])
+                   probe('membership', '그룹 등록 여부', plan.target_group, 'membership', parents=['user', 'group'])])
     if preparation_scope(payload):
         root, isolated = preparation_paths(payload, settings)
         checks.extend([{**p, 'when_group_missing': True} for p in [
@@ -117,8 +117,8 @@ foreach ($p in $spec.probes) {
             'user' {
                 $user = Get-ADUser -Identity $p.target -Properties Enabled -ErrorAction Stop
                 $objects[$p.id] = $user
-                if ($user.Enabled) { Record $p 'passed' '존재 / 사용 가능한 계정' $null }
-                else { Record $p 'warning' '존재 / 사용 중지된 계정' $null }
+                if ($user.Enabled) { Record $p 'passed' '계정 확인 완료' $null }
+                else { Record $p 'warning' '비활성화된 계정' $null }
             }
             'group' {
                 $group = Get-ADGroup -Identity $p.target -Properties member -ErrorAction Stop
@@ -126,8 +126,8 @@ foreach ($p in $spec.probes) {
                 else { $objects[$p.id] = $group; Record $p 'passed' '존재 / 기존 그룹 사용' $null }
             }
             'membership' {
-                if (@($objects['group'].member) -contains $objects['user'].DistinguishedName) { Record $p 'passed' '현재 직접 가입되어 있습니다. (중첩 그룹 판정 아님)' $null }
-                else { Record $p 'passed' '현재 직접 가입되어 있지 않습니다. (중첩 그룹 판정 아님)' $null }
+                if (@($objects['group'].member) -contains $objects['user'].DistinguishedName) { Record $p 'passed' '그룹에 등록되어 있습니다.' $null }
+                else { Record $p 'passed' '그룹에 등록되어 있지 않습니다.' $null }
             }
             'ou' {
                 $objects[$p.id] = Get-ADOrganizationalUnit -Identity $p.target -ErrorAction Stop

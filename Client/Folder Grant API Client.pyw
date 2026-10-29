@@ -5951,8 +5951,7 @@ class AccessManager(QMainWindow):
         for check in result.get('checks',[]):
             target = f" · {check['target']}" if check.get('target') else ''
             self._log(f"{symbols.get(check.get('status'),'?')} {check.get('label','검사')}{target}: {check.get('message','')}")
-        for warning in result.get('warnings',[]):
-            self._log('안내: '+warning)
+        # 검증 범위 안내는 위 상세 JSON 로그에 보존하고 화면에는 반복하지 않습니다.
 
     @staticmethod
     def _api_log_summary(result,context):
