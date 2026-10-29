@@ -8,7 +8,7 @@ def test_group_preparation_only_creates_after_specific_missing_error_and_checks_
         'required_paths':[r'\\server\share\26012',r'\\server\share\26012\Isolated']}))
     assert command.count('Get-Item -LiteralPath')==2
     assert command.index('Get-Item') < command.index('New-ADGroup')
-    assert "-notmatch 'ADIdentityNotFoundException') { throw }" in command
+    assert 'if (-not (IsAdIdentityMissing $_)) { throw }' in command
     assert '-ErrorAction SilentlyContinue' not in command
     assert "if ([string]$group.GroupCategory -ne 'Security')" in command
     assert "-GroupCategory Security -GroupScope DomainLocal" in command

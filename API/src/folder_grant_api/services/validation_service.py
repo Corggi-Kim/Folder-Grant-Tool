@@ -5,6 +5,7 @@ import ntpath
 from datetime import datetime, timezone
 from folder_grant_api.domain.project_codes import project_segment_for_folder
 from folder_grant_api.infrastructure.powershell import PowerShellRunner
+from folder_grant_api.infrastructure.powershell_errors import AD_IDENTITY_MISSING_FUNCTION
 from folder_grant_api.schemas.validation import ValidationCheck, ValidationResponse
 
 NOTICE = ['검증 시점의 조회 결과입니다. 실제 권한 변경 성공을 보장하지 않습니다.',
@@ -76,7 +77,7 @@ def project_probes(payload, plan, settings):
 
 
 # All targets are transported as data, not interpolated PowerShell source.
-READ_ONLY_SCRIPT = r'''
+READ_ONLY_SCRIPT = AD_IDENTITY_MISSING_FUNCTION + r'''
 $spec = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__SPEC__')) | ConvertFrom-Json
 $script:checks = New-Object 'System.Collections.Generic.List[object]'
 $states = @{}; $objects = @{}
@@ -86,7 +87,8 @@ function Record($p, $status, $message, $target) {
     $states[$p.id] = $status
 }
 function IsMissing($err) {
-    return ($err.Exception.GetType().FullName -match 'ADIdentityNotFoundException|ItemNotFoundException')
+    if (IsAdIdentityMissing $err) { return $true }
+    return ($err.Exception.GetType().FullName -match 'ItemNotFoundException')
 }
 function AclInfo($path) {
     $acl = Get-Acl -LiteralPath $path -ErrorAction Stop
