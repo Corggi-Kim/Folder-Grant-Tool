@@ -237,3 +237,56 @@ def test_disabled_removal_still_blocks_missing_or_unreadable_accounts(user_error
     probes=access_probes(payload,create_plan(payload,settings),settings)
     checks=run_script(probes,[p['target'] for p in probes if p['type']=='path'],user_disabled=True,user_error=user_error)
     assert checks['user']['status']==expected
+
+
+def closed_request_probes():
+    settings=Settings()
+    payload=AccessJobRequest(request_id='CLOSED',source='swagger',operation='revoke',
+        project_status='closed',employee_id='E1',project_code='1201',requested_by='op')
+    probes=access_probes(payload,create_plan(payload,settings),settings)
+    candidates=next(p for p in probes if p['id']=='closed')['candidates']
+    import ntpath
+    shares=[ntpath.splitdrive(c)[0] for c in candidates]+['']
+    return probes,candidates,shares
+
+
+@pytest.mark.parametrize('operation',['grant','revoke'])
+def test_closed_archive_fallback_is_a_success_not_a_warning(operation):
+    settings=Settings()
+    payload=AccessJobRequest(request_id='FALLBACK',source='swagger',operation=operation,
+        project_status='closed',employee_id='E1',project_code='1201',requested_by='op')
+    probes=access_probes(payload,create_plan(payload,settings),settings)
+    _,candidates,shares=closed_request_probes()
+    checks=run_script(probes,shares+[candidates[1]])
+    assert checks['closed']['status']=='passed'
+    assert checks['closed']['target']==candidates[1]
+    assert checks['closed_0']['status']=='not_applicable'
+    assert all(c['status'] in ('passed','not_applicable') for c in checks.values()),checks
+
+
+def test_closed_primary_wins_and_archive_is_not_queried():
+    probes,candidates,shares=closed_request_probes()
+    checks=run_script(probes,shares+[candidates[0]],denied=[candidates[1]])
+    assert checks['closed']['status']=='passed'
+    assert checks['closed']['target']==candidates[0]
+    assert 'closed_1' not in checks
+
+
+def test_closed_both_missing_is_failed():
+    probes,candidates,shares=closed_request_probes()
+    checks=run_script(probes,shares)
+    assert checks['closed']['status']=='failed'
+
+
+def test_closed_primary_lookup_error_is_not_missing_even_if_archive_exists():
+    probes,candidates,shares=closed_request_probes()
+    checks=run_script(probes,shares+[candidates[1]],denied=[candidates[0]])
+    assert checks['closed_0']['status']=='unknown'
+    assert checks['closed']['status']=='unknown'
+
+
+def test_closed_archive_acl_error_still_blocks():
+    probes,candidates,shares=closed_request_probes()
+    checks=run_script(probes,shares+[candidates[1]],denied_acl=[candidates[1]])
+    assert checks['closed']['status']=='passed'
+    assert checks['closed_acl']['status']=='unknown'

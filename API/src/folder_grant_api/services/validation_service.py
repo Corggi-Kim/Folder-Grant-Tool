@@ -180,7 +180,9 @@ foreach ($p in $spec.probes) {
                         Record $q 'passed' '폴더 존재 / 실행 시 이 경로 선택' $null
                         $found=$item; break
                     } catch {
-                        if (IsMissing $_) { Record $q 'warning' '이 후보에는 폴더 없음' $null }
+                        # A missing candidate is expected during ordered fallback.
+                        # The final closed check decides whether a target was found.
+                        if (IsMissing $_) { Record $q 'not_applicable' '이 경로에는 폴더 없음 / 다음 경로 확인' $null }
                         else { Record $q 'unknown' $_.Exception.Message $null; $unknown=$true }
                     }
                 }
