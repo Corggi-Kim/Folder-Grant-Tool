@@ -91,7 +91,7 @@ HELP_PAGES = (
     ("버튼 안내", (
         ("권한 요청 · 목록 준비", "수동 입력은 직접 요청을 추가할 때, 엑셀 불러오기는 파일에 정리된 요청을 가져올 때 사용합니다. BUS 요청 조회를 누르면 BUS의 권한 요청을 다시 불러옵니다."),
         ("신규 프로젝트 · 목록 준비", "수동 추가 또는 BUS 신규 조회로 요청을 준비하고 선택 실행을 누르세요. 아직 그룹·폴더가 없어도 생성 작업을 바로 시작합니다. 서버가 생성·권한 적용·최종 확인을 수행합니다."),
-        ("선택 실행과 자동 검증", "권한 요청은 실제 사용자·그룹·폴더를 먼저 검증하고 통과한 항목만 실행합니다. 신규 프로젝트는 사전 검증 없이 그룹·폴더 생성 작업을 등록하며, 생성 과정과 최종 확인은 서버에서 수행합니다. 결과와 오류는 작업 로그에서 확인하세요."),
+        ("선택 실행과 자동 검증", "권한 요청은 실제 사용자·그룹·폴더를 먼저 검증하고 통과한 항목만 실행합니다. 신규 프로젝트는 사전 검증 없이 그룹·폴더 생성 작업을 등록하며, 생성 과정과 최종 확인은 서버에서 수행합니다. 비활성 계정도 권한 해제는 진행하고, 권한 부여는 보류합니다. 검증 결과는 작업 로그에 한 줄로 요약하며 상세 내역은 로그 파일에 기록합니다."),
         ("BUS 완료 재확인", "권한 작업은 성공했는데 BUS 완료가 되지 않았을 때 사용하세요. 서버 결과를 다시 확인한 뒤 완료 처리를 시도합니다. 권한 작업 자체를 다시 실행하는 버튼은 아닙니다."),
         ("상세 정보와 진행 표시", "권한 요청은 대상 사번 아래에 이름·부서를 표시합니다. 신규 프로젝트는 요청이 없어도 상세 항목이 남아 있으며, 보안 그룹 생성 → 프로젝트 폴더 생성 → 권한 적용 → BUS 완료 처리의 4단계로 보여 줍니다. 회전은 처리 중임을 뜻하고, 성공 여부는 서버 결과로 확인합니다."),
         ("중지", "다음 항목의 실행을 멈추고 진행 중인 작업에 취소를 요청합니다. 이미 진행 중인 처리는 멈추기까지 시간이 걸릴 수 있으며, 적용된 권한이 자동으로 되돌아가지는 않습니다."),
@@ -3708,6 +3708,10 @@ class NewItemsViewer(QDialog):
         item = self.tbl.item(row,self._hidx.get('프로젝트코드',-1))
         if not item:
             return
+        if (result.get('status') in {'submitting','validating','completion_checking'}
+                and getattr(self,'_timed_project_row',None) != row):
+            self._timed_project_row = row
+            self.host._start_request_timer()
         meta = dict(item.data(Qt.UserRole) or {})
         meta.pop('show_validation',None); meta.pop('completion_check_error',None)
         if result.get('auto_validation'):
@@ -3790,6 +3794,7 @@ class NewItemsViewer(QDialog):
         if not items:
             return
         parent.stop_requested = False
+        self._timed_project_row = None
         parent._progress_started_at = time.monotonic()
         parent._progress_elapsed = 0.0
         parent._progress_detail = 'BUS 완료 재확인 중' if completion_only else '요청 검증 중' if dry_run else '프로젝트 생성 중'
@@ -3842,8 +3847,6 @@ class NewItemsViewer(QDialog):
         self._refresh_project_detail()
         if result.get('status') == 'validated':
             self.host._log_validation(result,f'프로젝트 {item.text() if item else row+1}')
-            if result.get('preflight_blocked'):
-                self.host._log(result.get('message','실행 보류'))
             return
         summary = (f'프로젝트 {item.text() if item else row+1}: '+self._project_result_label(result)+' · '+(result.get('message') or result.get('error_message') or '')
                    if result.get('completion_only') else self.host._api_log_summary(result,f'프로젝트 {item.text() if item else row+1}'))
@@ -4520,6 +4523,38 @@ def validation_label(result):
             'failed':'요청 검증 실패','unknown':'요청 검증 확인 불가'}.get(result.get('validation_status'),'요청 검증 확인 불가')
 
 
+def validation_log_summary(result):
+    """Keep the GUI concise; _log_validation writes the full result to disk."""
+    if result.get('client_stopped'):
+        return '실행 보류 — 중지 요청'
+    if result.get('group_preparation'):
+        return '그룹 생성 확인 필요 — Isolated 보안 그룹 없음'
+    checks = result.get('checks') or []
+    if result.get('validation_status') == 'passed':
+        if any(c.get('id')=='user' and '비활성' in c.get('message','')
+               and '권한 해제' in c.get('message','') for c in checks):
+            return '검증 통과 — 비활성 계정, 권한 해제 진행'
+        ids = {c.get('id','') for c in checks if c.get('status')=='passed'}
+        parts = []
+        if 'user' in ids: parts.append('계정')
+        if 'group' in ids: parts.append('그룹')
+        if any(i.startswith(('level','share','closed','project_root','template')) for i in ids):
+            parts.append('폴더')
+        return '검증 통과 — '+('·'.join(parts)+' 확인 완료' if parts else '확인 완료')
+    issues = [c for c in checks if c.get('status') in {'failed','warning','unknown'}]
+    causes = [c for c in issues if not c.get('message','').startswith('선행 대상')]
+    if causes or issues:
+        severity = {'failed':0,'unknown':1,'warning':2}
+        check = min(causes or issues,key=lambda c: severity[c['status']])
+        reason = check.get('label','확인 필요')+': '+check.get('message','확인 불가')
+    else:
+        reason = result.get('message') or '상세 로그 확인 필요'
+    reason = ' '.join(str(reason).split())
+    if len(reason)>100: reason = reason[:99]+'…'
+    title = '실행 보류' if result.get('preflight_blocked') else validation_label(result)
+    return title+' — '+reason
+
+
 def request_status_presentation(status):
     if status in {'그룹 생성 확인 중','보안 그룹 준비 중'}:
         return status,'blue'
@@ -5050,6 +5085,10 @@ class AccessManager(QMainWindow):
         self._progress_timer.timeout.connect(self._refresh_progress_status)
         self._progress_timer.timeout.connect(self._refresh_detail)
 
+
+    def _start_request_timer(self):
+        self._progress_started_at = time.monotonic()
+        self._progress_elapsed = 0.0
 
     def _format_elapsed(self) -> str:
         if getattr(self, "_progress_started_at", None) is None:
@@ -5865,6 +5904,7 @@ class AccessManager(QMainWindow):
         row,payload,dry = entry[:3]
         retry_job_id = entry[3] if len(entry)>3 else None
         self.current_row = row
+        self._start_request_timer()
         meta = self._row_metadata(row)
         meta.pop('show_validation',None)
         meta['live_result'] = dict(status='validating')
@@ -5946,12 +5986,7 @@ class AccessManager(QMainWindow):
     def _log_validation(self, result, context):
         self.log_toggle.setChecked(True)
         self._log(json.dumps(result,ensure_ascii=False,indent=2),
-                  summary=f'{context}: {validation_label(result)}')
-        symbols = {'passed':'✓','failed':'✕','unknown':'?','warning':'!','not_applicable':'-'}
-        for check in result.get('checks',[]):
-            target = f" · {check['target']}" if check.get('target') else ''
-            self._log(f"{symbols.get(check.get('status'),'?')} {check.get('label','검사')}{target}: {check.get('message','')}")
-        # 검증 범위 안내는 위 상세 JSON 로그에 보존하고 화면에는 반복하지 않습니다.
+                  summary=f'{context}: {validation_log_summary(result)}')
 
     @staticmethod
     def _api_log_summary(result,context):
@@ -6436,8 +6471,6 @@ class AccessManager(QMainWindow):
             self._set_row_metadata(row,meta)
             self.table.item(row,self.COL_STATUS).setText(('실행 보류 · ' if result.get('preflight_blocked') else '')+validation_label(result))
             self._log_validation(result,f'{row+1}행 · 프로젝트 {self._get(row,self.COL_PROJ)}')
-            if result.get('preflight_blocked'):
-                self._log(result.get('message','실행 보류'))
             self.done_jobs += 1
             self._refresh_detail()
             return
@@ -6656,7 +6689,7 @@ class AccessManager(QMainWindow):
             if not message:
                 message = '서버 실제 성공 후에만 BUS 완료 가능' if meta.get('source')=='bus' else '선택한 요청의 서버 결과를 표시합니다.'
             if validation:
-                message = '아래 작업 로그에서 각 항목의 실제 조회 결과를 확인하세요. 검증은 권한을 변경하지 않습니다.'
+                message = '작업 로그에서 검증 요약을 확인하세요. 상세 결과는 로그 파일에 기록됩니다.'
             self.status_label.setText(message)
         else:
             self.detail_banner_title.setText('선택 요청 대기')
