@@ -25,7 +25,9 @@ function Get-Item {
 }
 function Get-ADUser {
  [CmdletBinding()] param($Identity,$Properties)
- return [pscustomobject]@{SID='user-sid';Enabled=$true;DistinguishedName='user-dn'}
+ if ($fixture.user_error -eq 'missing') { throw [System.Management.Automation.ItemNotFoundException]::new('user missing') }
+ if ($fixture.user_error -eq 'denied') { throw [UnauthorizedAccessException]::new('user lookup denied') }
+ return [pscustomobject]@{SID='user-sid';Enabled=(-not $fixture.user_disabled);DistinguishedName='user-dn'}
 }
 function Get-ADGroup {
  [CmdletBinding()] param($Identity,$Properties)
@@ -204,3 +206,34 @@ $serialized = [System.Management.Automation.PSSerializer]::Deserialize([System.M
     result=subprocess.run([PWSH,'-NoProfile','-NonInteractive','-EncodedCommand',base64.b64encode(script.encode('utf-16-le')).decode()],capture_output=True,timeout=15,env=env)
     assert result.returncode==0, result.stderr.decode(errors='replace')
     assert json.loads(result.stdout.decode('utf-8-sig')) == [True,True,True,False,False]
+
+
+@pytest.mark.parametrize('operation,project_status,expected', [
+    ('revoke','progress','passed'), ('revoke','closed','passed'), ('grant','progress','warning')])
+def test_disabled_account_is_allowed_only_for_permission_removal(operation, project_status, expected):
+    settings=Settings()
+    payload=AccessJobRequest(request_id='DISABLED',source='swagger',operation=operation,
+        project_status=project_status,employee_id='E1',project_code='26012',level2='Study',level3='DM',requested_by='op')
+    probes=access_probes(payload,create_plan(payload,settings),settings)
+    paths=[p['target'] for p in probes if p['type']=='path']
+    for p in probes:
+        if p['type']=='closed':
+            import ntpath
+            paths.extend(p['candidates'])
+            paths.extend(ntpath.splitdrive(c)[0] for c in p['candidates'])
+            paths.append('')  # Linux pwsh reports an empty Path.GetPathRoot for UNC fixtures.
+    checks=run_script(probes,paths,user_disabled=True)
+    assert checks['user']['status']==expected
+    assert '비활성' in checks['user']['message']
+    if operation=='revoke':
+        assert all(c['status'] in ('passed','not_applicable') for c in checks.values()), checks
+
+
+@pytest.mark.parametrize('user_error,expected',[('missing','failed'),('denied','unknown')])
+def test_disabled_removal_still_blocks_missing_or_unreadable_accounts(user_error,expected):
+    settings=Settings()
+    payload=AccessJobRequest(request_id='USER-ERROR',source='swagger',operation='revoke',
+        project_status='progress',employee_id='E1',project_code='26012',level2='Study',level3='DM',requested_by='op')
+    probes=access_probes(payload,create_plan(payload,settings),settings)
+    checks=run_script(probes,[p['target'] for p in probes if p['type']=='path'],user_disabled=True,user_error=user_error)
+    assert checks['user']['status']==expected

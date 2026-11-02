@@ -24,7 +24,8 @@ def share_probe(path, id='share'):
 
 
 def access_probes(payload, plan, settings):
-    checks = [probe('user', '대상 AD 사용자', payload.employee_id, 'user')]
+    checks = [probe('user', '대상 AD 사용자', payload.employee_id, 'user',
+                    allow_disabled=payload.operation == 'revoke')]
     if payload.project_status == 'closed':
         # Candidate roots can independently fail; the selected target is the required check.
         checks.append(probe('closed', '종료 프로젝트 폴더', plan.target_paths[0], 'closed',
@@ -120,6 +121,7 @@ foreach ($p in $spec.probes) {
                 $user = Get-ADUser -Identity $p.target -Properties Enabled -ErrorAction Stop
                 $objects[$p.id] = $user
                 if ($user.Enabled) { Record $p 'passed' '계정 확인 완료' $null }
+                elseif ($p.allow_disabled) { Record $p 'passed' '비활성 계정 · 권한 해제 가능' $null }
                 else { Record $p 'warning' '비활성화된 계정' $null }
             }
             'group' {

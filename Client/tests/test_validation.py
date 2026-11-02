@@ -126,3 +126,70 @@ class ValidationTests(unittest.TestCase):
         with patch.object(self.m.time,'monotonic',return_value=105):w._refresh_detail()
         self.assertIn('이번 요청 경과 00:05',w.status_label.text())
         w._finish_progress_status()
+
+
+class RequestDisplayTests(unittest.TestCase):
+    setUp=design.DesignTests.setUp
+
+    def test_access_timer_restarts_for_each_queued_request(self):
+        w=self.window
+        rows=[self.fixture.row('test-client'),self.fixture.row('test-client')]
+        w.run_queue=[(row,dict(request_id=str(row),operation='revoke'),False) for row in rows]
+        w.total_jobs=2;w.done_jobs=0
+        with patch.object(self.m.time,'monotonic',return_value=100):w._set_progress_status('실행 중')
+        with patch.object(self.m,'QThread'),patch.object(self.m,'ApiJobWorker'):
+            for tick in (200,300):
+                w.api_thread=None
+                with patch.object(self.m.time,'monotonic',return_value=tick):
+                    w._start_next_job()
+                    self.assertEqual(w._format_elapsed(),'00:00')
+        w.api_thread=None;w.api_worker=None;w._finish_progress_status()
+
+    def test_project_timer_restarts_for_new_row_but_not_poll_or_bus_phase(self):
+        w=self.window;v=self.m.NewItemsViewer(w);self.addCleanup(v.close)
+        v._manual_add('26012','A');v._manual_add('26013','B')
+        with patch.object(self.m.time,'monotonic',return_value=100):w._set_progress_status('실행 중')
+        for row,tick,status,elapsed in [(0,200,'submitting','00:00'),(0,205,'validating','00:05'),
+                (0,210,'running','00:10'),(0,215,'running','00:15'),(1,300,'submitting','00:00'),
+                (1,310,'running','00:10')]:
+            with patch.object(self.m.time,'monotonic',return_value=tick):
+                v._on_project_progress(row,dict(status=status,bus_processing=tick==215))
+                self.assertEqual(w._format_elapsed(),elapsed)
+        w._finish_progress_status()
+
+    def test_validation_screen_is_one_line_and_file_keeps_all_checks(self):
+        w=self.window;result=validation()
+        result['checks'][0]['message']='비활성 계정 · 권한 해제 가능'
+        w.log.clear()
+        w._log_validation(result,'2행 · 프로젝트 25117')
+        lines=w.log.toPlainText().splitlines()
+        self.assertEqual(len(lines),1)
+        self.assertIn('비활성 계정',lines[0]);self.assertIn('권한 해제 진행',lines[0])
+        self.assertNotIn('server',lines[0])
+        with open(os.path.join(self.m.LOG_DIR,'access.log'),encoding='utf-8') as f:
+            detail=f.read()
+        self.assertIn('"checks"',detail);self.assertIn('Level3 폴더',detail)
+
+    def test_blocked_validation_is_one_line_including_reason(self):
+        w=self.window;row=self.fixture.row();w.current_row=row;w.done_jobs=0
+        result=dict(validation(state='failed'),status='validated',preflight_blocked=True,
+            message='사전 검증이 통과하지 않아 실행을 보류했습니다.')
+        result['checks'][1]['message']='대상 없음'
+        w.log.clear()
+        w._on_api_result(result)
+        lines=w.log.toPlainText().splitlines()
+        self.assertEqual(len(lines),1)
+        self.assertIn('실행 보류',lines[0]);self.assertIn('Level3 폴더',lines[0]);self.assertIn('대상 없음',lines[0])
+        v=self.m.NewItemsViewer(w);self.addCleanup(v.close)
+        v._manual_add('26012','A');w.log.clear()
+        v._on_project_result(0,result)
+        self.assertEqual(len(w.log.toPlainText().splitlines()),1)
+
+    def test_summary_prioritizes_failed_resources_over_account_warning(self):
+        result=validation(state='failed')
+        result['preflight_blocked']=True
+        result['checks'][0].update(status='warning',message='비활성화된 계정')
+        result['checks'][1]['message']='대상 없음'
+        summary=self.m.validation_log_summary(result)
+        self.assertIn('Level3 폴더',summary)
+        self.assertNotIn('비활성화',summary)

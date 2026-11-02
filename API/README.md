@@ -231,7 +231,7 @@ python -m test_client.main
 
 ## 오픈·운영 인수 기록
 
-2026-10-29 릴리스 기준 자동 시험은 **113개 통과(선택 PowerShell 시험 포함)**입니다. 선택 시험은 `FGT_TEST_POWERSHELL`에 인터프리터를 지정해야 실행되며 실제 AD·SMB 변경을 대신하지 않습니다.
+2026-11-02 작업 기준 자동 시험은 **118개 통과(선택 PowerShell 시험 포함)**입니다. 선택 시험은 `FGT_TEST_POWERSHELL`에 인터프리터를 지정해야 실행되며 실제 AD·SMB 변경을 대신하지 않습니다.
 
 [오픈·운영 인수인계 Word](../docs/오픈_운영_인수인계.docx)에 서비스 계정·환경·백업·실제 시험·승인·문의·중단 기준을 기록합니다. 비밀값은 문서에 넣지 않습니다. API Key를 가진 호출자의 `requested_by`가 신뢰 가능한 개인 인증 정보는 아니므로 사용자별 권한이 필요한 범위로 확대할 때는 인증 구조를 보완해야 합니다.
 
@@ -256,3 +256,7 @@ ordinary access-job request IDs conflict. Preparation jobs cannot use `/retry`.
 GET, by-request and cancel work normally. A successful preparation is not a
 successful permission request: revalidate and submit the original access request
 separately. No database migration is required.
+
+### 비활성 계정의 권한 해제
+
+`operation=revoke` 검증은 계정이 존재하고 비활성화된 경우에도 사용자 확인을 통과시킵니다. `grant`는 비활성 계정을 주의로 분류해 실행을 보류합니다. 계정 없음·조회 오류와 그룹·폴더·ACL 오류는 계속 구분하며, Client가 주의 결과를 임의로 무시하지 않습니다.
