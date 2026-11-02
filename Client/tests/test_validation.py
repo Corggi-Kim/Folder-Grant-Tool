@@ -193,3 +193,35 @@ class RequestDisplayTests(unittest.TestCase):
         summary=self.m.validation_log_summary(result)
         self.assertIn('Level3 폴더',summary)
         self.assertNotIn('비활성화',summary)
+
+
+class StopFeedbackTests(unittest.TestCase):
+    setUp=design.DesignTests.setUp
+
+    def test_repeated_stop_requests_once_and_disables_stop_until_final_result(self):
+        w=self.window;worker=Mock();w.api_worker=worker;w.api_thread=Mock()
+        w.session.cancel_current=Mock()
+        try:
+            w._set_running_ui(True)
+            w._stop_all();w._stop_all()
+            self.assertEqual(worker.stop.call_count,1)
+            self.assertFalse(w.btn_stop.isEnabled())
+            self.assertEqual(w.log.toPlainText().count('중지를 요청했습니다'),1)
+            self.assertFalse(self.m.can_complete_bus(dict(status='cancelled',executor_mode='powershell'),'bus'))
+        finally:
+            w.api_worker=None;w.api_thread=None;w._set_running_ui(False)
+        w._set_running_ui(True)
+        self.assertTrue(w.btn_stop.isEnabled())
+        w._set_running_ui(False)
+
+    def test_project_stop_button_also_stays_disabled_while_stopping(self):
+        w=self.window;v=self.m.NewItemsViewer(w);w._newdlg=v
+        self.addCleanup(v.close)
+        v.worker=Mock();v.worker_thread=Mock()
+        try:
+            v._set_busy(True)
+            w._stop_all();v._set_busy(True)
+            self.assertFalse(v.btn_stop.isEnabled())
+            self.assertEqual(v.worker.stop.call_count,1)
+        finally:
+            v.worker=None;v.worker_thread=None;w._set_running_ui(False)

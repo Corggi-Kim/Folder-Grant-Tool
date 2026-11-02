@@ -36,7 +36,7 @@ from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QTim
 from openpyxl import load_workbook
 
 APP_NAME = "Folder Grant API Client"
-APP_VERSION = "1.1.2"  #구조변경, 기능추가/수정, 오류/버그수정
+APP_VERSION = "1.1.3"  #구조변경, 기능추가/수정, 오류/버그수정
 APP_BUILD = "2026-11-02"
 APP_VERSION_STR = f"v{APP_VERSION}"
 
@@ -97,6 +97,7 @@ HELP_PAGES = (
         ("중지", "다음 항목의 실행을 멈추고 진행 중인 작업에 취소를 요청합니다. 이미 진행 중인 처리는 멈추기까지 시간이 걸릴 수 있으며, 적용된 권한이 자동으로 되돌아가지는 않습니다."),
     )),
     ("문제 해결", (
+        ("실행 중 중지", "중지를 누르면 다음 요청을 실행하지 않고 서버에 현재 작업의 중지를 요청합니다. 서버는 해당 PowerShell과 하위 작업을 종료한 뒤 중지 결과를 반환합니다. 확인하는 동안 중지 버튼은 비활성화됩니다. 이미 적용된 권한은 자동 복구되지 않으며 중지된 요청은 BUS 완료 처리하지 않습니다."),
         ("부분 성공은 어떤 뜻인가요?", "일부 단계만 처리된 상태입니다. 예를 들어 그룹에 사용자를 추가했지만 폴더 권한 적용에는 실패했을 수 있습니다. 오른쪽 상세에서 실패한 단계와 이유를 확인하세요. 이 상태에서는 BUS를 완료 처리하지 않습니다."),
         ("문제를 고친 뒤 다시 실행하려면?", "폴더 누락 등 표시된 원인을 먼저 해결하세요. 실패하거나 부분 성공한 권한 요청을 체크하고 선택 실행을 누른 뒤 재시도 안내를 확인하세요. 이전에 성공한 단계는 유지하고 남은 단계를 다시 처리합니다."),
         ("신규 프로젝트 생성이 실패했을 때", "로그와 상세에서 실패 단계를 확인하고 서버 담당자와 실제 그룹·폴더 상태를 확인하세요. 권한 요청의 실패 단계 재실행 기능과는 다릅니다. 서버 생성은 성공했고 BUS만 완료되지 않았다면 신규 프로젝트 탭의 BUS 완료 재확인을 사용하세요."),
@@ -3396,7 +3397,7 @@ class NewItemsViewer(QDialog):
         self.btn_complete.setEnabled(not on)
         self.tbl.setContextMenuPolicy(Qt.PreventContextMenu if on else Qt.CustomContextMenu)
         self.chk_auto_complete.setEnabled(not on)
-        self.btn_stop.setEnabled(on)
+        self.btn_stop.setEnabled(on and not getattr(self.host,'_stop_in_progress',False))
 
     def _on_worker_progress(self, cur: int, total: int, message: str):
         self.status_lbl.setText(message)
@@ -5821,6 +5822,9 @@ class AccessManager(QMainWindow):
         self.log.clear()
 
     def _stop_all(self):
+        if getattr(self,'_stop_in_progress',False):
+            return
+        self._stop_in_progress = True
         self.run_queue = []
         self.stop_requested = True
         self._ignore_bus_results = True
@@ -5830,10 +5834,13 @@ class AccessManager(QMainWindow):
         self.session.cancel_current()
         if self.api_worker is not None:
             self.api_worker.stop()
-            self._log('API 취소 요청 후 최종 상태를 기다립니다.')
+        self._log('중지를 요청했습니다. 이미 적용된 권한은 자동 복구되지 않습니다.')
         newdlg = getattr(self,'_newdlg',None)
         if newdlg and getattr(newdlg,'worker',None):
             newdlg.worker.stop()
+        self.btn_stop.setEnabled(False)
+        if newdlg:
+            newdlg.btn_stop.setEnabled(False)
         if self.api_thread is None and not self.session.is_busy():
             self._set_running_ui(False)
         if self.api_thread is not None or (newdlg and newdlg.worker_thread is not None) or self.session.is_busy():
@@ -5846,6 +5853,8 @@ class AccessManager(QMainWindow):
         running = running or getattr(self,'api_thread',None) is not None or getattr(self,'_waiting_for_bus',False)
         newdlg = getattr(self,'_newdlg',None)
         running = running or bool(newdlg and getattr(newdlg,'worker_thread',None))
+        if not running:
+            self._stop_in_progress = False
         if running:
             self._set_progress_status(
                 getattr(self, "_progress_detail", "") or "처리 중",
@@ -5883,7 +5892,7 @@ class AccessManager(QMainWindow):
                 w.setEnabled(not running)
 
         if hasattr(self, "btn_stop") and self.btn_stop:
-            self.btn_stop.setEnabled(running)
+            self.btn_stop.setEnabled(running and not getattr(self,'_stop_in_progress',False))
 
         self.setAcceptDrops(not running)
         if hasattr(self,'table'):

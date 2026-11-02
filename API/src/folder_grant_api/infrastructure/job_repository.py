@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import case, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -147,15 +147,22 @@ class JobRepository:
         return self.get(job.id), False
 
     def request_cancel(self, job: JobRecord, actor: str) -> JobRecord:
-        job.cancel_requested = True
-        if job.status == "queued":
-            job.status = "cancelled"
-            job.finished_at = utc_now()
+        now = utc_now()
+        changed = self.session.execute(update(JobRecord).where(
+            JobRecord.id == job.id, JobRecord.status.in_(['queued','running'])
+        ).values(cancel_requested=True,
+                 status=case((JobRecord.status=='queued','cancelled'),else_='cancel_requested'),
+                 finished_at=case((JobRecord.status=='queued',now),else_=JobRecord.finished_at)),
+            execution_options={'synchronize_session':False})
+        if not changed.rowcount:
+            self.session.rollback()
+            self.session.refresh(job)
+            return job
+        self.session.refresh(job)
+        if job.status == "cancelled":
             for step in job.steps:
                 step.status = "cancelled"
                 step.finished_at = job.finished_at
-        elif job.status == "running":
-            job.status = "cancel_requested"
         self.session.add(AuditLogRecord(
             job_id=job.id,
             event_type="job.cancel_requested",

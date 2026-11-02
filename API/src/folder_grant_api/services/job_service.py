@@ -65,4 +65,7 @@ class JobService:
         job = self.get(job_id)
         if job.status not in {"queued", "running"}:
             raise JobNotCancellableError(job.status)
-        return self.repository.request_cancel(job, actor)
+        result = self.repository.request_cancel(job, actor)
+        if result.status not in {'cancel_requested','cancelled'}:
+            raise JobNotCancellableError(result.status)
+        return result
