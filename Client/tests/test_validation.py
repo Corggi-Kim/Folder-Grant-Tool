@@ -225,3 +225,25 @@ class StopFeedbackTests(unittest.TestCase):
             self.assertEqual(v.worker.stop.call_count,1)
         finally:
             v.worker=None;v.worker_thread=None;w._set_running_ui(False)
+
+
+class NotApplicableStepTests(unittest.TestCase):
+    setUp=design.DesignTests.setUp
+
+    def test_closed_group_step_is_green_without_completing_acl_or_bus(self):
+        w=self.window
+        for source in ('bus','test-client'):
+            row=self.fixture.row(source)
+            w.table.item(row,w.COL_KIND).setText('종료')
+            w.table.item(row,w.COL_STATUS).setText('API 실행중')
+            w._set_row_metadata(row,dict(w._row_metadata(row),live_result=dict(job_id='closed',status='running',
+                steps=[dict(type='revoke_closed_acl',status='running')])))
+            w.table.setCurrentCell(row,w.COL_PROJ);w._refresh_detail()
+            self.assertEqual(w.step_icons[1].property('state'),'succeeded')
+            self.assertEqual(w.step_icons[1].text(),'✓')
+            self.assertIn('해당 없음',w.step_labels[1].text())
+            self.assertEqual(w.step_icons[2].property('state'),'running')
+            self.assertEqual(w.step_icons[3].property('state'),'queued')
+            self.assertFalse(w._row_metadata(row).get('bus_done'))
+        row=self.fixture.row();w.table.setCurrentCell(row,w.COL_PROJ);w._refresh_detail()
+        self.assertEqual(w.step_icons[1].property('state'),'queued')

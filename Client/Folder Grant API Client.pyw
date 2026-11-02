@@ -36,7 +36,7 @@ from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QTim
 from openpyxl import load_workbook
 
 APP_NAME = "Folder Grant API Client"
-APP_VERSION = "1.1.3"  #구조변경, 기능추가/수정, 오류/버그수정
+APP_VERSION = "1.1.4"  #구조변경, 기능추가/수정, 오류/버그수정
 APP_BUILD = "2026-11-02"
 APP_VERSION_STR = f"v{APP_VERSION}"
 
@@ -6673,6 +6673,8 @@ class AccessManager(QMainWindow):
             if steps and all(s.get('status')=='succeeded' for s in steps): return 'succeeded'
             return 'queued'
         statuses[1] = phase(groups); statuses[2] = phase(acls)
+        if valid and values.get('kind')=='종료' and not groups:
+            statuses[1] = 'succeeded'
         if active and result.get('status')=='preparing': statuses[1] = 'running'
         if meta.get('bus_done'):
             statuses[3] = 'succeeded'
@@ -6680,7 +6682,7 @@ class AccessManager(QMainWindow):
             statuses[3] = 'running'
         labels = ['요청 검증','그룹 권한 적용','폴더 권한 적용','BUS 완료 처리']
         if valid and meta.get('source')!='bus': labels[3] += ' · 수동 요청 제외'
-        elif values.get('kind')=='종료': labels[1] += ' · 해당 없음'
+        if values.get('kind')=='종료': labels[1] += ' · 해당 없음'
         for index,(icon,label,state) in enumerate(zip(self.step_icons,self.step_labels,statuses)):
             icon.setText('✓' if state=='succeeded' else str(index+1))
             label.setText(labels[index])
