@@ -36,8 +36,8 @@ from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QTim
 from openpyxl import load_workbook
 
 APP_NAME = "Folder Grant API Client"
-APP_VERSION = "1.1.4"  #구조변경, 기능추가/수정, 오류/버그수정
-APP_BUILD = "2026-11-02"
+APP_VERSION = "1.1.5"  #구조변경, 기능추가/수정, 오류/버그수정
+APP_BUILD = "2026-11-03"
 APP_VERSION_STR = f"v{APP_VERSION}"
 
 THEMES = {'light': {'bg': '#f4f6fa',
@@ -97,6 +97,7 @@ HELP_PAGES = (
         ("중지", "다음 항목의 실행을 멈추고 진행 중인 작업에 취소를 요청합니다. 이미 진행 중인 처리는 멈추기까지 시간이 걸릴 수 있으며, 적용된 권한이 자동으로 되돌아가지는 않습니다."),
     )),
     ("문제 해결", (
+        ("목록에 없는 폴더 요청", "DM_IWRS처럼 선택 목록에 없는 폴더도 BUS·엑셀에서 불러와 처리할 수 있습니다. 수동 입력에서는 Level3에 실제 폴더명을 직접 입력하세요. 실행 전 실제 폴더와 권한 처리 조건을 확인하며, 폴더가 없거나 조회할 수 없으면 보류합니다."),
         ("실행 중 중지", "중지를 누르면 다음 요청을 실행하지 않고 서버에 현재 작업의 중지를 요청합니다. 서버는 해당 PowerShell과 하위 작업을 종료한 뒤 중지 결과를 반환합니다. 확인하는 동안 중지 버튼은 비활성화됩니다. 이미 적용된 권한은 자동 복구되지 않으며 중지된 요청은 BUS 완료 처리하지 않습니다."),
         ("부분 성공은 어떤 뜻인가요?", "일부 단계만 처리된 상태입니다. 예를 들어 그룹에 사용자를 추가했지만 폴더 권한 적용에는 실패했을 수 있습니다. 오른쪽 상세에서 실패한 단계와 이유를 확인하세요. 이 상태에서는 BUS를 완료 처리하지 않습니다."),
         ("문제를 고친 뒤 다시 실행하려면?", "폴더 누락 등 표시된 원인을 먼저 해결하세요. 실패하거나 부분 성공한 권한 요청을 체크하고 선택 실행을 누른 뒤 재시도 안내를 확인하세요. 이전에 성공한 단계는 유지하고 남은 단계를 다시 처리합니다."),
@@ -198,7 +199,23 @@ SHARE_ROOT = r"\\LSK_S010\Study Folder\{proj_seg}\{lv2}\{lv3}"
 CLOSED_ROOT = r"\\192.168.1.95\Study_Closed"
 CLOSED_ARCHIVE_ROOT = r"\\192.168.1.95\Study_Archive"
 
+# Recommended names; BUS/Excel and manual entries may use other safe folder names.
 LEVEL3_CHOICES = ["ARS","CO","DM","ER","MW","PM","PV","RA","SSU","STAT","STAT_IDMC","ETC"]
+
+
+def normalize_level3_folder(value: str) -> str:
+    value = (value or '').strip()
+    if not value:
+        raise ValueError('Level3 폴더명을 입력하세요.')
+    if (len(value)>50 or value in {'.','..'} or value.endswith('.')
+            or any(c in r'<>:"/\|?*[]' or ord(c)<32 or ord(c)==127 for c in value)):
+        raise ValueError('Level3는 경로 구분자·와일드카드가 없는 한 개의 폴더명으로 입력하세요.')
+    reserved = {'CON','PRN','AUX','NUL','CONIN$','CONOUT$','CLOCK$'} | {
+        prefix+number for prefix in ('COM','LPT') for number in '123456789¹²³'}
+    if value.split('.',1)[0].rstrip().upper() in reserved:
+        raise ValueError('Level3에 사용할 수 없는 예약된 폴더명입니다.')
+    return value.upper() if value.upper() in LEVEL3_CHOICES else value
+
 
 ROLE_MAP: Dict[str, List[str]] = {
     "Trial STAT/SP": ["3.Dataset", "4.Analysis", "5.SDTM", "6.Validation"],
@@ -485,9 +502,7 @@ def make_access_payload(values: dict, request_id: str, source: str, requested_by
     if operation not in {REQ_GRANT, REQ_RELEASE}:
         raise ValueError('권한부여 또는 권한해제 요청이어야 합니다.')
     lv2 = normalize_lv2(str(values.get('lv2', '')).strip())
-    lv3 = str(values.get('lv3', '')).strip().upper()
-    if not closed and (lv2 not in {'Study', 'Isolated'} or lv3 not in LEVEL3_CHOICES):
-        raise ValueError('진행 과제의 Level2·Level3를 확인하세요.')
+    lv3 = normalize_level3_folder(str(values.get('lv3') or '')) if not closed else None
     return dict(request_id=request_id, source=source,
                 operation='revoke' if operation == REQ_RELEASE else 'grant',
                 project_status='closed' if closed else 'progress', employee_id=user,
@@ -2952,6 +2967,9 @@ class ManualEntryDialog(QDialog):
         self.cb_lv2.setCurrentIndex(-1)
 
         self.cb_lv3.addItems(LEVEL3_CHOICES)
+        self.cb_lv3.setEditable(True)
+        self.cb_lv3.setInsertPolicy(QComboBox.NoInsert)
+        self.cb_lv3.setToolTip('목록에서 선택하거나 실제 폴더명을 입력하세요.')
         self.cb_lv3.setCurrentIndex(-1)
 
         self.cb_role.addItem("")
@@ -2992,7 +3010,7 @@ class ManualEntryDialog(QDialog):
     def _refresh_role_candidates(self):
         try:
             lv2 = self.cb_lv2.currentText().strip() if self.cb_lv2.currentIndex() != -1 else ""
-            lv3 = self.cb_lv3.currentText().strip() if self.cb_lv3.currentIndex() != -1 else ""
+            lv3 = self.cb_lv3.currentText().strip()
             is_new = self._is_new_by_proj_text()
 
             self.cb_role.blockSignals(True)
@@ -3051,7 +3069,7 @@ class ManualEntryDialog(QDialog):
             user = self.le_user.text().strip()
             proj = self.le_proj.text().strip()
             lv2  = self.cb_lv2.currentText().strip() if self.cb_lv2.currentIndex() != -1 else ""
-            lv3  = self.cb_lv3.currentText().strip() if self.cb_lv3.currentIndex() != -1 else ""
+            lv3  = self.cb_lv3.currentText().strip()
             role = self.cb_role.currentText().strip() if self.cb_role.isEnabled() else ""
 
             missing = []
@@ -3063,6 +3081,13 @@ class ManualEntryDialog(QDialog):
             if missing:
                 QMessageBox.warning(self, "입력 누락", f"다음 항목을 입력해 주세요: {', '.join(missing)}")
                 return
+
+            if kind != '종료':
+                try:
+                    lv3 = normalize_level3_folder(lv3)
+                except ValueError as exc:
+                    QMessageBox.warning(self,'입력 확인',str(exc))
+                    return
 
             if not is_stat_lv3(lv3):
                 role = ""

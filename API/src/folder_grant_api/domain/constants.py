@@ -2,6 +2,7 @@ from typing import Final
 
 DOMAIN_EMAIL_SUFFIX: Final = "lskglobal.com"
 
+# Recommendations and canonical spellings, not an execution allowlist.
 LEVEL3_CHOICES: Final = {
     "ARS", "CO", "DM", "ER", "MW", "PM", "PV", "RA", "SSU", "STAT",
     "STAT_IDMC", "ETC",

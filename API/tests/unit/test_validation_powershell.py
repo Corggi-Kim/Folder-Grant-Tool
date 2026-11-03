@@ -290,3 +290,21 @@ def test_closed_archive_acl_error_still_blocks():
     checks=run_script(probes,shares+[candidates[1]],denied_acl=[candidates[1]])
     assert checks['closed']['status']=='passed'
     assert checks['closed_acl']['status']=='unknown'
+
+
+@pytest.mark.parametrize('condition',['exists','missing','denied'])
+def test_dynamic_folder_keeps_live_resource_validation(condition):
+    settings=Settings()
+    payload=AccessJobRequest(request_id='DYNAMIC-LIVE',source='bus',operation='grant',project_status='progress',
+        employee_id='E1',project_code='26051',level2='Isolated',level3='DM_IWRS',requested_by='op')
+    plan=create_plan(payload,settings)
+    probes=access_probes(payload,plan,settings)
+    paths=[p['target'] for p in probes if p['type']=='path']
+    target=plan.target_paths[0]
+    if condition=='missing':paths=[p for p in paths if p!=target]
+    checks=run_script(probes,paths,denied=[target] if condition=='denied' else [])
+    expected={'exists':'passed','missing':'failed','denied':'unknown'}[condition]
+    assert checks['level3']['target']==target
+    assert checks['level3']['status']==expected
+    if condition=='exists':assert all(c['status'] in ('passed','not_applicable') for c in checks.values())
+    else:assert checks['acl']['status']=='unknown'

@@ -47,6 +47,22 @@ class ContractTests(unittest.TestCase):
                             self.client.make_bus_request_id(values, 'original-2'))
         self.assertNotEqual(self.client.new_client_request_id(), self.client.new_client_request_id())
 
+    def test_unlisted_folders_are_accepted_from_bus_and_excel(self):
+        for folder in ('DM_IWRS','DM_CUSTOM','Project Documents','한글폴더','straße'):
+            for source in ('bus','test-client'):
+                values=dict(kind='진행',req='권한부여',user='E123',proj='26051',lv2='Isolated',lv3=folder,role='')
+                payload=self.client.make_access_payload(values,'DYNAMIC',source,'operator')
+                self.assertEqual(payload['level3'],folder)
+                self.assertEqual(payload['level2'],'Isolated')
+
+    def test_unsafe_folder_names_are_not_sanitized_into_other_targets(self):
+        for folder in (None,'','.', '..', '../DM',r'DM\CO',r'\\server\share','C:DM','DM:stream','*','DM?',
+                       'DM[1]','DM|CO','DM<CO','DM>CO','DM"CO','DM\x00','DM\nCO','DM.',
+                       'CON','con.txt','LPT1','COM¹','CONIN$','x'*51):
+            with self.subTest(folder=folder),self.assertRaises(ValueError):
+                self.client.make_access_payload(dict(kind='진행',req='권한부여',user='E123',proj='26051',
+                    lv2='Isolated',lv3=folder,role=''),'INVALID','bus','operator')
+
 
 if __name__ == '__main__':
     unittest.main()
