@@ -146,6 +146,8 @@ class TestClientWindow(QMainWindow):
         self.level2_combo.addItems(["Study", "Isolated"])
         self.level3_combo = QComboBox()
         self.level3_combo.addItems(LEVEL3_VALUES)
+        self.level3_combo.setEditable(True)
+        self.level3_combo.setInsertPolicy(QComboBox.NoInsert)
         self.role_combo = QComboBox()
         self.role_combo.addItems(ROLE_VALUES)
         self.add_button = QPushButton("목록에 추가")

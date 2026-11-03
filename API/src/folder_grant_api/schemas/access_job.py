@@ -2,9 +2,10 @@ from datetime import datetime
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from folder_grant_api.domain.operation_plan import Operation, ProjectStatus
+from folder_grant_api.domain.paths import normalize_level3
 
 
 class AccessJobRequest(BaseModel):
@@ -23,10 +24,11 @@ class AccessJobRequest(BaseModel):
 
     @field_validator("level3")
     @classmethod
-    def reject_path_separators(cls, value: str | None) -> str | None:
-        allowed = {"ARS", "CO", "DM", "ER", "MW", "PM", "PV", "RA", "SSU", "STAT", "STAT_IDMC", "ETC"}
-        if value and value.upper() not in allowed:
-            raise ValueError("허용되지 않는 Level3입니다.")
+    def reject_path_separators(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None or (value == '' and info.data.get('project_status') == ProjectStatus.CLOSED):
+            return value
+        normalize_level3(value)
+        # Keep the original spelling for persisted request/replay comparisons.
         return value
 
     @field_validator("level2")

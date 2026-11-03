@@ -8,7 +8,7 @@ from .constants import (
     LEGACY_STUDY_MAP,
     ROLE_MAP,
 )
-from .paths import build_active_path, build_closed_candidates, format_group_name, normalize_level2
+from .paths import build_active_path, build_closed_candidates, format_group_name, normalize_level2, normalize_level3
 from .project_codes import canonical_project_code, is_new_template, is_stat_idmc_new_policy
 
 
@@ -51,8 +51,11 @@ def _validate_common(employee_id: str, project_code: str, level3: str | None) ->
         raise PlanValidationError("INVALID_EMPLOYEE_ID", "대상자 사번이 필요합니다.")
     if not project_code or not project_code.strip():
         raise PlanValidationError("INVALID_PROJECT_CODE", "프로젝트 코드가 필요합니다.")
-    if level3 is not None and any(char in level3 for char in ("\\", "/")):
-        raise PlanValidationError("INVALID_LEVEL3", "Level3에는 경로 구분자를 사용할 수 없습니다.")
+    if level3:
+        try:
+            normalize_level3(level3)
+        except ValueError as exc:
+            raise PlanValidationError('INVALID_LEVEL3',str(exc)) from exc
 
 
 def build_operation_plan(
@@ -96,7 +99,7 @@ def build_operation_plan(
         raise PlanValidationError("MISSING_FOLDER_LEVEL", "진행 프로젝트에는 Level2와 Level3가 필요합니다.")
 
     level2_normalized = normalize_level2(level2)
-    level3_normalized = level3.strip().upper()
+    level3_normalized = normalize_level3(level3)
     group_name = format_group_name(project_code, level2_normalized)
     target_path = build_active_path(project_code, level2_normalized, level3_normalized, share_root)
     membership_type = "add_ad_group_member" if operation == Operation.GRANT else "remove_ad_group_member"

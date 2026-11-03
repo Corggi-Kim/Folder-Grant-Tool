@@ -95,3 +95,25 @@ class AutomaticValidationTests(unittest.TestCase):
                 worker._bus_click_process.assert_not_called()
         v=self.m.NewItemsViewer(self.window);self.addCleanup(v.close)
         self.assertTrue(v.btn_preview.isHidden())
+
+    def test_dynamic_bus_folder_still_requires_successful_preflight(self):
+        w=self.window;w.chk_auto_complete.setChecked(False)
+        rows=[self.fixture.row(),self.fixture.row()]
+        for row in rows:
+            w.table.item(row,w.COL_LV2).setText('Isolated')
+            w.table.item(row,w.COL_LV3).setText('DM_IWRS')
+        blocked_id=w._row_metadata(rows[1])['request_id']
+        api=Mock();api.api_key='test'
+        def request(method,path,payload=None):
+            if path.endswith('/validate'):
+                return validation(payload['request_id'],'failed' if payload['request_id']==blocked_id else 'passed')
+            return dict(job_id='DYNAMIC',status='succeeded',executor_mode='powershell')
+        api.request.side_effect=request;w._api_client=Mock(return_value=api)
+        with patch.object(self.m.QMessageBox,'question',return_value=self.m.QMessageBox.Yes):
+            w._execute_selected();self.fixture.wait_for_api()
+        self.assertEqual([c.args[1] for c in api.request.call_args_list],
+            ['/api/v1/access-jobs/validate','/api/v1/access-jobs','/api/v1/access-jobs/validate'])
+        self.assertTrue(all(c.args[2]['level3']=='DM_IWRS' for c in api.request.call_args_list))
+        self.assertEqual(w._row_metadata(rows[0])['result']['status'],'succeeded')
+        self.assertIn('실행 보류',w.table.item(rows[1],w.COL_STATUS).text())
+        self.assertFalse(self.fixture.completed)

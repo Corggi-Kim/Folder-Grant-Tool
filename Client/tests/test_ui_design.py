@@ -20,9 +20,9 @@ class DesignTests(unittest.TestCase):
         self.app.processEvents()
 
     def test_version_and_build_are_visible_in_main_header(self):
-        self.assertEqual(self.m.APP_VERSION,'1.1.4')
-        self.assertEqual(self.m.APP_BUILD,'2026-11-02')
-        self.assertEqual(self.window.release_label.text(),'V1.1.4 Build:20261102')
+        self.assertEqual(self.m.APP_VERSION,'1.1.5')
+        self.assertEqual(self.m.APP_BUILD,'2026-11-03')
+        self.assertEqual(self.window.release_label.text(),'V1.1.5 Build:20261103')
         self.show()
         w = self.window
         self.assertGreater(w.release_label.mapTo(w,self.m.QPoint(0,0)).y(),w.btn_stop.mapTo(w,self.m.QPoint(0,0)).y()+w.btn_stop.height())
@@ -355,3 +355,17 @@ class DesignTests(unittest.TestCase):
         self.assertFalse(hasattr(dialog,'sb_notify'))
         self.assertEqual(dialog.result()[-1],15)
         dialog.close()
+
+
+class DynamicFolderEntryTests(unittest.TestCase):
+    setUp=DesignTests.setUp
+
+    def test_manual_entry_accepts_folder_outside_recommendations(self):
+        dialog=self.m.ManualEntryDialog(self.window);self.addCleanup(dialog.close)
+        self.assertTrue(dialog.cb_lv3.isEditable())
+        dialog.le_user.setText('E123');dialog.le_proj.setText('26051')
+        dialog.cb_lv2.setCurrentText('Isolated')
+        dialog.cb_lv3.setEditText('DM_IWRS')
+        dialog._on_ok()
+        self.assertEqual(dialog.result_row[4],'DM_IWRS')
+        self.assertEqual(dialog.result_row[6],'')
