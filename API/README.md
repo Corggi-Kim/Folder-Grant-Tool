@@ -1,6 +1,6 @@
 # Folder Grant API
 
-권한 부여·해제와 신규 프로젝트 생성을 처리하는 독립 API 서버입니다. 현재 패키지 버전은 **0.4.5**입니다. BUS 조회·완료는 [정식 Client](../Client/README.md)가 담당하고, API는 AD·폴더 권한 실행과 작업 이력을 관리합니다. 기존 `Folder Grant Tool_v3.3.5.pyw`는 수정하지 않습니다.
+권한 부여·해제와 신규 프로젝트 생성을 처리하는 독립 API 서버입니다. 현재 패키지 버전은 **0.4.6**입니다. BUS 조회·완료는 [정식 Client](../Client/README.md)가 담당하고, API는 AD·폴더 권한 실행과 작업 이력을 관리합니다. 기존 `Folder Grant Tool_v3.3.5.pyw`는 수정하지 않습니다.
 
 현재 구현은 실제 자원 검증·Preview·Job API와 Mock/PowerShell 실행기를 제공합니다. 안내 기준은 2026-11-02 릴리스입니다. 입력값을 검증한 뒤 대상 AD 그룹, 폴더 경로와 실행 계획을 만들고 SQLite에 작업 이력을 저장합니다.
 
@@ -41,10 +41,11 @@ pytest
 | `GET` | `/api/v1/access-jobs/by-request/{request_id}` | 요청번호로 작업 조회 |
 | `POST` | `/api/v1/access-jobs/{job_id}/cancel` | 대기/실행 중 작업 취소 요청 |
 | `POST` | `/api/v1/access-jobs/prepare-group` | 명시적 동의 후 누락 Isolated 그룹·기본 RX 준비, 별도 Job |
-| `POST` | `/api/v1/access-jobs/{job_id}/retry` | 실제 실패·부분 성공 권한 Job의 미완료 단계 재실행 |
+| `POST` | `/api/v1/access-jobs/{job_id}/retry` | 중지·실패·부분 성공 권한 Job의 미완료 단계 재실행 |
 | `POST` | `/api/v1/project-jobs/preview` | 신규 프로젝트 그룹·폴더 생성 계획 확인 |
 | `POST` | `/api/v1/project-jobs/validate` | 그룹·생성 위치·템플릿 구조·기존 폴더 읽기 전용 검증 |
 | `POST` | `/api/v1/project-jobs` | 신규 프로젝트 생성 Job 등록 |
+| `POST` | `/api/v1/project-jobs/{job_id}/retry` | 프로젝트 Job 재실행, 원래 요청 연결 유지 |
 | `GET` | `/api/v1/project-jobs/{job_id}` | 신규 프로젝트 Job 상태 조회 |
 | `GET` | `/api/v1/project-jobs/by-request/{request_id}` | 요청번호로 신규 프로젝트 Job 조회 |
 | `POST` | `/api/v1/project-jobs/{job_id}/cancel` | 신규 프로젝트 Job 취소 요청 |
@@ -113,7 +114,7 @@ Restart-Service FolderGrantApi
 
 수동 Uvicorn 실행이면 서버를 종료하고 다시 실행합니다. `POWERSHELL_TIMEOUT`은 단순한 클라이언트 조회 실패가 아니라 서버가 실행 제한에 도달하여 PowerShell 프로세스를 종료한 결과입니다. 일부 권한이 적용됐을 수 있으며 이후 단계는 실행되지 않습니다. 실행 제한을 늘려도 기존의 실패·부분 성공 Job은 자동으로 재개되거나 성공으로 바뀌지 않습니다.
 
-같은 `request_id`를 다시 등록하면 기존 또는 최신 재실행 Job을 반환하므로 권한을 다시 실행하지 않습니다. 원인과 실제 권한을 확인한 뒤 **실패한 권한 작업 재실행** 절차의 `/retry`를 사용하세요. 정식 Client에서는 실패·부분 성공 항목을 선택하고 **선택 실행**의 재실행 안내를 확인합니다. 임의 새 요청번호로 중복 접수하지 마세요. **BUS 완료 재확인**은 서버 결과를 조회하고 BUS 완료만 처리하며 권한 작업을 재등록하지 않습니다.
+같은 `request_id`를 다시 등록하면 기존 또는 최신 재실행 Job을 반환하므로 권한을 다시 실행하지 않습니다. 원인과 실제 권한을 확인한 뒤 **미완료 작업 재실행** 절차의 `/retry`를 사용하세요. 정식 Client에서는 중지·실패·부분 성공 항목을 선택하고 **선택 실행**의 재실행 안내를 확인합니다. 임의 새 요청번호로 중복 접수하지 마세요. **BUS 완료 재확인**은 서버 결과를 조회하고 BUS 완료만 처리하며 권한 작업을 재등록하지 않습니다.
 
 ## 실제 요청 검증
 
@@ -219,19 +220,21 @@ python -m test_client.main
 이 개발 도구는 수동 요청 추가, Preview, 다중 Job 등록, 상태 자동 조회, 취소 및 결과 로그를 제공합니다. BUS 연동은 이 도구에 없으며 별도 `Client/`에서 제공합니다.
 
 
-### 실패한 권한 작업 재실행
+### 미완료 작업과 완료 작업 재실행
 
-`POST /api/v1/access-jobs/{job_id}/retry`에 `{"requested_by":"operator"}`를 보내면 PowerShell 모드의 `failed`·`partially_succeeded` 권한 Job을 새 Job으로 재실행합니다. API Key 인증이 필요하며, 성공·진행 중·취소·Mock·신규 프로젝트 Job은 이 엔드포인트의 대상이 아닙니다.
+`POST /api/v1/access-jobs/{job_id}/retry` 또는 `/api/v1/project-jobs/{job_id}/retry`에 `{"requested_by":"operator"}`를 보내면 PowerShell 모드의 `failed`·`partially_succeeded`·종료가 확인된 `cancelled` Job을 새 Job으로 재실행합니다. API Key 인증이 필요합니다. 진행 중·Mock·그룹 준비·종료 미확인(`POWERSHELL_STOP_FAILED`) 작업은 제외합니다. 실행 전에 취소된 작업도 재시도할 수 있습니다.
 
-성공한 단계의 결과는 `reused_from_job_id`와 함께 보존하고 실패한 단계 및 미실행 단계만 다시 실행합니다. 기존 Job은 변경하지 않습니다. 같은 이전 Job에 대한 중복 접수는 하나의 재실행 Job을 반환합니다. 재실행도 실패하면 그 재실행 Job ID를 대상으로 다시 접수할 수 있습니다.
+성공한 단계의 결과는 `reused_from_job_id`와 함께 보존하고 실패한 단계 및 미실행 단계만 다시 실행합니다. 기존 Job은 변경하지 않습니다. 같은 이전 Job과 같은 재실행 모드의 중복 접수는 하나의 재실행 Job을 반환합니다. 같은 부모에 다른 모드로 접수하면 409를 반환합니다. 재실행도 실패하면 그 재실행 Job ID를 대상으로 다시 접수할 수 있습니다.
 
-응답의 `original_request_id`는 최초 요청번호입니다. `GET /api/v1/access-jobs/{job_id}`는 지정 이력 그대로, `GET /api/v1/access-jobs/by-request/{request_id}`와 원래 요청의 중복 등록 응답은 최신 재실행 Job을 반환합니다. 이 연결은 DB에 보존되며 기존 DB 테이블·컬럼 변경은 필요하지 않습니다. 서버·클라이언트 모두 업데이트 후 API 서비스를 재시작하세요. 이미 성공한 단계는 재검증하지 않으므로 해당 성공 상태를 외부에서 변경했다면 별도 확인이 필요합니다.
+응답의 `original_request_id`는 최초 요청번호입니다. `GET /api/v1/access-jobs/{job_id}`는 지정 이력 그대로, `GET /api/v1/access-jobs/by-request/{request_id}`와 원래 요청의 중복 등록 응답은 최신 재실행 Job을 반환합니다. 이 연결은 DB에 보존되며 기존 DB 테이블·컬럼 변경은 필요하지 않습니다. 서버·클라이언트 모두 업데이트 후 API 서비스를 재시작하세요. 기본 재시도는 이미 성공한 단계를 재검증하지 않습니다. 완료된 작업을 사용자가 다시 실행하기로 선택한 경우 `{"requested_by":"operator","restart_all":true}`로 전체 단계를 새 작업에 등록할 수 있습니다. 기존 Job·BUS 완료 기록을 지우지 않습니다. 두 탭 모두 원래 요청번호의 조회·중복 등록은 최신 재실행 결과를 반환합니다. 실제 AD 가입·개인 ACL을 대조하는 별도 완료 검증 기능은 이번에 추가하지 않았습니다.
+
+프로젝트 템플릿 복사 단계가 시작된 뒤 미완료로 끝났고 루트 폴더가 남아 있으면, 재시도는 `PROJECT_TEMPLATE_REPAIR_REQUIRED`로 중단합니다. 기존 폴더를 보고 복사가 완료됐다고 간주하지 않으며 기존 파일을 덮어쓰는 복구도 하지 않습니다. 서버 담당자가 내용·권한을 확인하고 별도로 복구해야 합니다. 같은 재시도 버튼이 이 보호를 해제하지 않습니다. 대상 루트가 없으면 기존 생성 절차로 복사합니다.
 
 재실행도 기존 in-process BackgroundTasks 실행기를 사용합니다. **서버 프로세스가 실행 도중 종료되어 queued/running 상태로 남은 작업은 이 기능이 자동 복구하지 않습니다.** 남아 있는 PowerShell 프로세스와 실제 권한 상태를 확인하지 않고 중복 실행하지 않도록, 진행 중·불확실한 작업은 재실행 대상으로 취급하지 않습니다. 완료된 재실행 이력의 원래 요청번호 연결은 서버 재시작 후에도 유지됩니다.
 
 ## 오픈·운영 인수 기록
 
-2026-11-03 작업 기준 자동 시험은 **191개 통과·Windows 전용 1개 건너뜀**입니다. 선택 시험은 `FGT_TEST_POWERSHELL`에 인터프리터를 지정해야 실행되며 실제 AD·SMB 변경을 대신하지 않습니다.
+2026-11-04 작업 기준 자동 시험은 **252개 통과·Windows 전용 1개 건너뜀**입니다. 선택 시험은 `FGT_TEST_POWERSHELL`에 인터프리터를 지정해야 실행되며 실제 AD·SMB 변경을 대신하지 않습니다.
 
 [오픈·운영 인수인계 Word](../docs/오픈_운영_인수인계.docx)에 서비스 계정·환경·백업·실제 시험·승인·문의·중단 기준을 기록합니다. 비밀값은 문서에 넣지 않습니다. API Key를 가진 호출자의 `requested_by`가 신뢰 가능한 개인 인증 정보는 아니므로 사용자별 권한이 필요한 범위로 확대할 때는 인증 구조를 보완해야 합니다.
 
@@ -269,7 +272,7 @@ separately. No database migration is required.
 
 API 0.4.4부터 인증된 취소 요청을 실행 중에도 확인합니다. Windows Job Object에 PowerShell을 등록한 다음 명시적 시작 신호를 보내므로, 관리 등록 실패나 stdin 연결 종료만으로 권한 명령이 실행되지 않습니다. 해당 Job의 PowerShell·icacls·robocopy만 종료하며 다른 작업은 종료하지 않습니다. 제한 시간 초과도 같은 정리 경로를 사용합니다. 종료를 확인하지 못하면 `POWERSHELL_STOP_FAILED`로 기록하고 성공이나 중지 완료로 간주하지 않습니다.
 
-실행 중이던 단계와 남은 단계는 `cancelled`, 이미 성공한 단계는 `succeeded`로 유지합니다. 일부 권한·그룹·폴더가 변경되었을 수 있으며 자동 복구하지 않습니다. 취소와 최종 성공은 DB 조건부 갱신으로 처리하여 뒤늦은 취소가 완료 상태를 덮어쓰지 않습니다. 취소된 작업은 기존 권한 재실행 API 대상이 아니므로 실제 반영 상태를 확인해야 합니다.
+실행 중이던 단계와 남은 단계는 `cancelled`, 이미 성공한 단계는 `succeeded`로 유지합니다. 일부 권한·그룹·폴더가 변경되었을 수 있으며 자동 복구하지 않습니다. 취소와 최종 성공은 DB 조건부 갱신으로 처리하여 뒤늦은 취소가 완료 상태를 덮어쓰지 않습니다. 종료가 확인된 취소 작업은 재실행 API로 남은 단계를 새 작업에 요청할 수 있습니다. 이전 성공 단계와 부분 반영 이력은 유지합니다.
 
 업데이트 전부터 실행 중인 기존 PowerShell에는 이 관리 방식이 소급 적용되지 않습니다. 진행 중 작업을 확인한 후 API를 갱신·재시작하세요. 자동 시험은 Linux 프로세스와 실제 pwsh·AD 대역을 사용했으며, 네이티브 Windows Job Object 종료 시험 1개는 Windows에서 추가 실행해야 합니다.
 
@@ -278,3 +281,9 @@ API 0.4.4부터 인증된 취소 요청을 실행 중에도 확인합니다. Win
 API 0.4.5부터 Level3는 고정 선택 목록의 포함 여부 대신 안전한 단일 Windows 폴더명인지 확인합니다. `DM_IWRS` 등 목록 밖 폴더도 기존 일반 폴더 권한 규칙으로 처리하며 STAT·STAT_IDMC·ETC와 Role 특수 처리는 유지합니다. 경로는 여전히 서버 설정·프로젝트 코드·Level2로 구성합니다. 구분자·상위 경로·와일드카드·제어 문자·예약 이름·끝의 점을 거부하고 최대 50자를 유지합니다. Client 사전 검증과 실제 폴더·ACL 확인도 생략하지 않습니다.
 
 추천 목록에 있는 이름만 실행 경로에서 기존 표기로 정규화하고, 목록 밖 이름은 대소문자를 보존합니다. API 저장 요청의 기존 철자는 유지하므로 소문자로 저장된 과거 요청도 동일한 내용이면 정상 재조회합니다. 종료 과제의 사용하지 않는 빈 Level3도 기존 요청 호환을 유지합니다. 개발용 test_client의 Level3에도 직접 입력할 수 있습니다.
+
+### 중지 지연 진단 (0.4.6)
+
+PowerShell 출력 수집과 취소·제한 시간 감시를 별도 스레드로 분리했습니다. 출력 파이프 수집이 지연돼도 감시를 계속하며, 해당 프로세스 트리 종료를 확인한 뒤 중지 결과를 기록합니다. 종료 미확인 상태를 중지 완료로 바꾸지 않습니다. `uvicorn.error` 로그에 Job ID·단계·UTC 시각·PID·경과 시간과 `cancel.observed`, `stop.begin`, `stop.confirmed`, `cancel.persist_begin`, `cancel.persisted`를 남깁니다. 출력 수집만 남으면 `output.cleanup_pending`을 기록합니다. Windows 서비스는 `logs\service.log`에서 확인합니다.
+
+운영 Windows·SMB에서 관찰된 수분 지연의 원인은 아직 확정하지 않았습니다. 단순 Sleep 취소와 실제 하위 명령·SMB 취소는 별도 시험이며, 업데이트 후 새 작업에서 단계별 로그와 실제 종료 시간을 확인해야 합니다.

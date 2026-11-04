@@ -22,6 +22,30 @@ class RequestIdConflictError(RuntimeError):
     pass
 
 
+def require_retryable_attempt(
+    job: JobRecord, executor_mode: str, restart_all: bool = False, repository: JobRepository | None = None,
+) -> None:
+    cancelled_before_start = (
+        job.status == "cancelled"
+        and job.started_at is None
+        and job.result_payload is None
+        and bool(job.steps)
+        and (all(step.status == "cancelled" for step in job.steps)
+             or (repository is not None and repository.has_trusted_reused_steps(job)))
+    )
+    stop_unconfirmed = job.error_code == "POWERSHELL_STOP_FAILED" or any(
+        step.error_code == "POWERSHELL_STOP_FAILED" for step in job.steps
+    )
+    if (
+        (job.status not in {"failed", "partially_succeeded", "cancelled"}
+         and not (restart_all and job.status == "succeeded"))
+        or executor_mode != "powershell"
+        or stop_unconfirmed
+        or not (cancelled_before_start or (job.result_payload or {}).get("executor_mode") == "powershell")
+    ):
+        raise JobNotRetryableError(job.status)
+
+
 class JobService:
     def __init__(self, session: Session):
         self.repository = JobRepository(session)
@@ -54,12 +78,12 @@ class JobService:
             raise JobNotFoundError(request_id)
         return self.repository.latest_attempt(job)
 
-    def retry(self,job_id: str,actor: str,executor_mode: str):
+    def retry(self, job_id: str, actor: str, executor_mode: str, restart_all: bool = False) -> tuple[JobRecord, bool]:
         parent = self.get(job_id)
-        if (parent.request_payload.get("confirm_group_creation") or parent.operation not in {"grant","revoke"} or parent.status not in {"failed","partially_succeeded"}
-                or executor_mode!="powershell" or (parent.result_payload or {}).get("executor_mode")!="powershell"):
+        if parent.request_payload.get("confirm_group_creation") or parent.operation not in {"grant", "revoke"}:
             raise JobNotRetryableError(parent.status)
-        return self.repository.create_retry(parent,actor)
+        require_retryable_attempt(parent, executor_mode, restart_all, self.repository)
+        return self.repository.create_retry(parent, actor, restart_all)
 
     def cancel(self, job_id: str, actor: str) -> JobRecord:
         job = self.get(job_id)

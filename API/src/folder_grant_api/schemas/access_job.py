@@ -113,5 +113,9 @@ class CancelJobRequest(BaseModel):
     requested_by: str = Field(min_length=1, max_length=100)
 
 
+class RetryJobRequest(CancelJobRequest):
+    restart_all: bool = False
+
+
 class PrepareGroupRequest(AccessJobRequest):
     confirm_group_creation: Literal[True]

@@ -6,6 +6,8 @@ from folder_grant_api.api.security import require_api_key
 from folder_grant_api.domain.project_codes import InvalidProjectCode
 from folder_grant_api.domain.project_plan import ProjectCreationPlan, build_project_creation_plan
 from folder_grant_api.infrastructure.models import JobRecord
+from folder_grant_api.infrastructure.job_repository import DuplicateRequestError
+from folder_grant_api.schemas.access_job import RetryJobRequest
 from folder_grant_api.schemas.project_job import (
     CancelProjectJobRequest,
     ProjectJobRequest,
@@ -13,7 +15,7 @@ from folder_grant_api.schemas.project_job import (
     ProjectJobStepResponse,
     ProjectPreviewResponse,
 )
-from folder_grant_api.services.job_service import JobNotCancellableError, JobNotFoundError, RequestIdConflictError
+from folder_grant_api.services.job_service import JobNotCancellableError, JobNotFoundError, JobNotRetryableError, RequestIdConflictError
 from folder_grant_api.services.project_job_service import ProjectJobService
 from folder_grant_api.settings import Settings, get_settings
 from folder_grant_api.workers.dispatcher import execute_job
@@ -47,6 +49,7 @@ def serialize_project_job(job: JobRecord, *, executor_mode: str, replayed: bool 
     return ProjectJobResponse(
         job_id=job.id,
         request_id=job.request_id,
+        original_request_id=payload.get("_original_request_id", job.request_id),
         replayed=replayed,
         status=job.status,
         executor_mode=recorded_mode,
@@ -164,3 +167,37 @@ def cancel_project_job(
             detail={"code": "JOB_NOT_CANCELLABLE", "message": f"현재 상태에서는 취소할 수 없습니다: {exc}"},
         ) from exc
     return serialize_project_job(job, executor_mode=request.app.state.settings.executor_mode)
+
+
+@router.post("/{job_id}/retry", response_model=ProjectJobResponse, status_code=status.HTTP_202_ACCEPTED)
+def retry_project_job(
+    job_id: str,
+    payload: RetryJobRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    response: Response,
+    session: Session = Depends(get_session),
+) -> ProjectJobResponse:
+    try:
+        job, replayed = ProjectJobService(session).retry(
+            job_id, payload.requested_by, request.app.state.settings.executor_mode, payload.restart_all,
+        )
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail={"code": "JOB_NOT_FOUND", "message": "작업을 찾을 수 없습니다."}) from exc
+    except JobNotRetryableError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "JOB_NOT_RETRYABLE", "message": "PowerShell 실패·부분 성공·중지 완료 작업을 재실행할 수 있습니다. 완료 작업은 restart_all=true로 요청하세요. 실행 중·모의 실행·종료 미확인 작업은 제외합니다."},
+        ) from exc
+    except DuplicateRequestError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "REQUEST_ID_CONFLICT", "message": "재실행 요청번호 충돌입니다."},
+        ) from exc
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    else:
+        background_tasks.add_task(
+            execute_job, request.app.state.session_factory, request.app.state.settings, job.id,
+        )
+    return serialize_project_job(job, executor_mode=request.app.state.settings.executor_mode, replayed=replayed)

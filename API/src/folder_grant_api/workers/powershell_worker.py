@@ -1,5 +1,6 @@
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select, update
+import logging
 
 from folder_grant_api.infrastructure.job_repository import JobRepository
 from folder_grant_api.infrastructure.models import AuditLogRecord, JobRecord, utc_now
@@ -9,13 +10,23 @@ from folder_grant_api.settings import Settings
 
 
 def execute_powershell_job(session_factory: sessionmaker, settings: Settings, job_id: str) -> None:
+    context = {'step':None,'pid':None}
+    def report(phase, info=None):
+        try:
+            info = info or {}
+            if info.get('pid') is not None: context['pid'] = info['pid']
+            logging.getLogger('uvicorn.error').info(
+                'executor job=%s step=%s phase=%s at=%s pid=%s elapsed=%s',
+                job_id,context['step'],phase,utc_now().isoformat(),context['pid'],info.get('elapsed_seconds','-'))
+        except Exception:
+            pass
     def cancellation_requested():
         # A fresh short transaction sees cancellation from another API request.
         with session_factory() as cancel_session:
             flag = cancel_session.scalar(select(JobRecord.cancel_requested).where(JobRecord.id == job_id))
             return flag is None or bool(flag)
     runner = PowerShellRunner(settings.powershell_path, settings.powershell_timeout_seconds,
-                             cancel_check=cancellation_requested)
+                             cancel_check=cancellation_requested,on_event=report)
     with session_factory() as session:
         repository = JobRepository(session)
         job = repository.get(job_id)
@@ -36,9 +47,11 @@ def execute_powershell_job(session_factory: sessionmaker, settings: Settings, jo
         for step in job.steps:
             session.refresh(job)
             if job.cancel_requested:
+                report('cancel.persist_begin')
                 _cancel_remaining_steps(job)
                 _audit_cancel(session, job)
                 session.commit()
+                report('cancel.persisted')
                 return
 
             if step.status == "succeeded":
@@ -47,9 +60,11 @@ def execute_powershell_job(session_factory: sessionmaker, settings: Settings, jo
             step.started_at = utc_now()
             session.commit()
             try:
+                context['step'] = step.step_order
                 command = build_step_command(step)
                 result = runner.run(command)
             except PowerShellCancelled as exc:
+                report('cancel.persist_begin')
                 session.refresh(job)
                 step.status = 'cancelled'
                 step.error_code = exc.code
@@ -58,6 +73,7 @@ def execute_powershell_job(session_factory: sessionmaker, settings: Settings, jo
                 _cancel_remaining_steps(job)
                 _audit_cancel(session, job, step.step_order)
                 session.commit()
+                report('cancel.persisted')
                 return
             except Exception as exc:
                 if isinstance(exc, PowerShellExecutionError):
@@ -98,10 +114,12 @@ def execute_powershell_job(session_factory: sessionmaker, settings: Settings, jo
         ).values(status='succeeded',result_payload=payload,finished_at=utc_now()),
             execution_options={'synchronize_session':False})
         if not completed.rowcount:
+            report('cancel.persist_begin')
             session.refresh(job)
             _cancel_remaining_steps(job)
             _audit_cancel(session, job)
             session.commit()
+            report('cancel.persisted')
             return
         session.add(AuditLogRecord(
             job_id=job.id,
@@ -153,6 +171,7 @@ def _audit_cancel(session, job, step_order=None):
 
 def _specific_error_code(message: str, fallback: str) -> str:
     known_codes = (
+        "PROJECT_TEMPLATE_REPAIR_REQUIRED",
         "PROJECT_ROOT_NOT_FOUND",
         "STUDY_ALL_NOT_FOUND",
         "ROOT_ACL_NOT_FOUND",

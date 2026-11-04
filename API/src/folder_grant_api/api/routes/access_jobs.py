@@ -6,7 +6,7 @@ from folder_grant_api.api.routes.preview import create_plan
 from folder_grant_api.api.security import require_api_key
 from folder_grant_api.infrastructure.models import JobRecord
 from folder_grant_api.infrastructure.job_repository import DuplicateRequestError
-from folder_grant_api.schemas.access_job import AccessJobRequest, PrepareGroupRequest, CancelJobRequest, JobResponse, JobStepResponse
+from folder_grant_api.schemas.access_job import AccessJobRequest, PrepareGroupRequest, CancelJobRequest, RetryJobRequest, JobResponse, JobStepResponse
 from folder_grant_api.services.job_service import (
     JobNotRetryableError,
     JobNotCancellableError,
@@ -175,14 +175,14 @@ def cancel_access_job(
 
 
 @router.post("/{job_id}/retry",response_model=JobResponse,status_code=status.HTTP_202_ACCEPTED)
-def retry_access_job(job_id: str,payload: CancelJobRequest,background_tasks: BackgroundTasks,
+def retry_access_job(job_id: str,payload: RetryJobRequest,background_tasks: BackgroundTasks,
                      request: Request,response: Response,session: Session=Depends(get_session)) -> JobResponse:
     try:
-        job,replayed = JobService(session).retry(job_id,payload.requested_by,request.app.state.settings.executor_mode)
+        job,replayed = JobService(session).retry(job_id,payload.requested_by,request.app.state.settings.executor_mode,payload.restart_all)
     except JobNotFoundError as exc:
         raise HTTPException(status_code=404,detail={"code":"JOB_NOT_FOUND","message":"작업을 찾을 수 없습니다."}) from exc
     except JobNotRetryableError as exc:
-        raise HTTPException(status_code=409,detail={"code":"JOB_NOT_RETRYABLE","message":"PowerShell 실패·부분 성공 작업만 재실행할 수 있습니다."}) from exc
+        raise HTTPException(status_code=409,detail={"code":"JOB_NOT_RETRYABLE","message":"PowerShell 실패·부분 성공·중지 완료 작업을 재실행할 수 있습니다. 완료 작업은 restart_all=true로 요청하세요. 실행 중·모의 실행·종료 미확인 작업은 제외합니다."}) from exc
     except DuplicateRequestError as exc:
         raise HTTPException(status_code=409,detail={"code":"REQUEST_ID_CONFLICT","message":"재실행 요청번호 충돌입니다."}) from exc
     if replayed:

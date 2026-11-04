@@ -2,6 +2,7 @@ import base64
 import os
 import signal
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -38,10 +39,12 @@ def encode_command(command: str) -> str:
 
 
 class PowerShellRunner:
-    def __init__(self, executable: str, timeout_seconds: int, cancel_check: Callable[[], bool] | None = None):
+    def __init__(self, executable: str, timeout_seconds: int, cancel_check: Callable[[], bool] | None = None,
+                 on_event: Callable[[str, dict], None] | None = None):
         self.executable = executable
         self.timeout_seconds = timeout_seconds
         self.cancel_check = cancel_check
+        self.on_event = on_event
 
     def run(self, command: str) -> PowerShellResult:
         wrapped = (
@@ -93,6 +96,28 @@ class PowerShellRunner:
         job = None
         process = None
         contained = False
+        terminated = False
+        io_started = False
+        io_done = threading.Event()
+        output = {}
+        started_at = time.monotonic()
+
+        def report(phase):
+            if self.on_event:
+                try:
+                    self.on_event(phase, {'pid':getattr(process,'pid',None),
+                                         'elapsed_seconds':round(time.monotonic()-started_at,3)})
+                except Exception:
+                    pass  # Diagnostics must never prevent stopping a Job.
+
+        def collect_output():
+            try:
+                output['streams'] = process.communicate(input=b'FGT_START\n')
+            except BaseException as exc:
+                output['error'] = exc
+            finally:
+                io_done.set()
+
         try:
             if WINDOWS:
                 job = WindowsJob()
@@ -111,26 +136,44 @@ class PowerShellRunner:
                     raise PowerShellExecutionError('POWERSHELL_PROCESS_CONTROL_FAILED',
                         '작업 프로세스를 안전하게 관리할 수 없어 실행하지 않았습니다.') from exc
             contained = True
+            report('process.contained')
             deadline = time.monotonic() + self.timeout_seconds
-            first_input = b'FGT_START\n'
             while True:
                 cancelled = self.cancel_check()
                 timed_out = time.monotonic() >= deadline
-                if cancelled or timed_out:
+                if cancelled or (timed_out and not io_done.is_set()):
+                    report('cancel.observed' if cancelled else 'timeout.observed')
+                    report('stop.begin')
                     self._terminate(process, job)
+                    terminated = True
+                    report('stop.confirmed')
+                    if io_started and not io_done.wait(.1):
+                        report('output.cleanup_pending')
                     if cancelled:
                         raise PowerShellCancelled()
                     raise PowerShellExecutionError('POWERSHELL_TIMEOUT',
                         f'PowerShell 실행 시간이 {self.timeout_seconds}초를 초과했습니다.')
-                try:
-                    stdout, stderr = process.communicate(input=first_input, timeout=min(.5, max(.01, deadline-time.monotonic())))
+                if io_done.is_set():
                     break
-                except subprocess.TimeoutExpired:
-                    first_input = None
+                if not io_started:
+                    # Only this collector owns the pipes. The monitor never waits
+                    # inside communicate(), stdin flushing, or output collection.
+                    threading.Thread(target=collect_output, name='fgt-process-output', daemon=True).start()
+                    io_started = True
+                    report('process.started')
+                io_done.wait(min(.25,max(.01,deadline-time.monotonic())))
             # Do not claim success if cancellation arrived as the process exited.
             if self.cancel_check():
+                report('cancel.observed')
+                report('stop.begin')
                 self._terminate(process, job)
+                terminated = True
+                report('stop.confirmed')
                 raise PowerShellCancelled()
+            if 'error' in output:
+                raise PowerShellExecutionError('POWERSHELL_IO_FAILED',
+                    'PowerShell 출력 수집에 실패했습니다: '+str(output['error'])) from output['error']
+            stdout, stderr = output['streams']
             result = PowerShellResult(process.returncode, stdout.decode('utf-8', errors='replace').strip(),
                                       stderr.decode('utf-8', errors='replace').strip())
             if not result.succeeded:
@@ -143,11 +186,18 @@ class PowerShellRunner:
                 if process is not None:
                     if contained:
                         # Also collect orphaned descendants after the parent exits.
-                        self._terminate(process, job)
+                        if not terminated:
+                            report('cleanup.begin')
+                            self._terminate(process, job)
+                            report('cleanup.confirmed')
                     else:
                         # Assignment failed: the stdin gate is still closed.
                         process.kill()
                         process.communicate(timeout=5)
+                    if not io_started:
+                        # No collector is using these streams in this path.
+                        for stream in (process.stdin,process.stdout,process.stderr):
+                            if stream is not None: stream.close()
             finally:
                 if job:
                     job.close()
@@ -162,7 +212,9 @@ class PowerShellRunner:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-            process.communicate(timeout=5)
+            # Pipe collection belongs to its own thread and may itself be stuck.
+            # Confirm process exit independently; never communicate concurrently.
+            process.wait(timeout=5)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise PowerShellExecutionError('POWERSHELL_STOP_FAILED',
                 '작업 프로세스 종료를 확인하지 못했습니다. 서버에서 해당 작업 상태를 확인하세요.') from exc
