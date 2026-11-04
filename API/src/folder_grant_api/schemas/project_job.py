@@ -58,6 +58,7 @@ class ProjectJobStepResponse(BaseModel):
 class ProjectJobResponse(BaseModel):
     job_id: str
     request_id: str
+    original_request_id: str | None = None
     replayed: bool = False
     status: str
     executor_mode: Literal["mock", "powershell"]

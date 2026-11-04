@@ -197,3 +197,55 @@ def test_windows_job_requires_all_descendants_to_exit_before_confirmation():
             with patch('folder_grant_api.infrastructure.process_tree.time.monotonic',side_effect=[0,6]):
                 with pytest.raises(TimeoutError):job.terminate()
         finally:job.close()
+
+
+@pytest.mark.parametrize('reason',['cancel','timeout'])
+def test_cancellation_monitor_does_not_wait_for_blocked_output_collection(reason):
+    from unittest.mock import Mock,patch
+    release=threading.Event();entered=threading.Event();stop=threading.Event()
+    process=Mock();process.returncode=0;process.wait.return_value=0
+    def blocked_output(*args,**kwargs):
+        entered.set()
+        assert release.wait(5)
+        return b'',b''
+    process.communicate.side_effect=blocked_output
+    job=Mock()
+    with patch('folder_grant_api.infrastructure.powershell.WINDOWS',True),patch('folder_grant_api.infrastructure.powershell.WindowsJob',return_value=job),patch('subprocess.Popen',return_value=process):
+        with ThreadPoolExecutor() as pool:
+            future=pool.submit(PowerShellRunner('unused',10 if reason=='cancel' else .3,cancel_check=stop.is_set).run,'ignored')
+            try:
+                assert entered.wait(2)
+                if reason=='cancel':stop.set()
+                with pytest.raises(PowerShellExecutionError) as error:future.result(timeout=1)
+                assert error.value.code==('POWERSHELL_CANCELLED' if reason=='cancel' else 'POWERSHELL_TIMEOUT')
+                assert not release.is_set()
+                job.terminate.assert_called()
+            finally:
+                stop.set();release.set()
+                try:future.result(timeout=5)
+                except PowerShellExecutionError:pass
+
+
+def test_output_collector_failure_reaches_monitor_and_cleans_process_tree():
+    from unittest.mock import Mock,patch
+    process=Mock();process.communicate.side_effect=OSError('pipe read failed')
+    process.wait.return_value=0;job=Mock()
+    with patch('folder_grant_api.infrastructure.powershell.WINDOWS',True),patch('folder_grant_api.infrastructure.powershell.WindowsJob',return_value=job),patch('subprocess.Popen',return_value=process):
+        with pytest.raises(PowerShellExecutionError) as error:
+            PowerShellRunner('unused',10,cancel_check=lambda:False).run('ignored')
+    assert error.value.code=='POWERSHELL_IO_FAILED'
+    process.communicate.assert_called_once_with(input=b'FGT_START\n')
+    job.terminate.assert_called_once()
+    process.wait.assert_called_once_with(timeout=5)
+
+
+def test_diagnostic_failure_cannot_prevent_cancellation():
+    from unittest.mock import Mock,patch
+    process=Mock();process.wait.return_value=0;job=Mock()
+    checks=iter([False,True])
+    def broken_diagnostic(*args):raise OSError('log unavailable')
+    with patch('folder_grant_api.infrastructure.powershell.WINDOWS',True),patch('folder_grant_api.infrastructure.powershell.WindowsJob',return_value=job),patch('subprocess.Popen',return_value=process):
+        with pytest.raises(PowerShellExecutionError) as error:
+            PowerShellRunner('unused',10,cancel_check=lambda:next(checks),on_event=broken_diagnostic).run('ignored')
+    assert error.value.code=='POWERSHELL_CANCELLED'
+    job.terminate.assert_called_once()

@@ -74,8 +74,10 @@ def test_cancel_during_final_step_is_not_overwritten_by_success(tmp_path):
 
 @pytest.mark.skipif(__import__('os').name=='nt',reason='POSIX executable fixture; Windows Job Object tested separately')
 @pytest.mark.parametrize('kind',['access','project','preparation'])
-def test_cancel_endpoint_stops_real_worker_process_tree(tmp_path,fake_powershell,kind):
+def test_cancel_endpoint_stops_real_worker_process_tree(tmp_path,fake_powershell,kind,caplog):
     import time
+    import logging
+    caplog.set_level(logging.INFO,logger='uvicorn.error')
     from types import SimpleNamespace
     executable,marker=fake_powershell
     route='project_jobs' if kind=='project' else 'access_jobs'
@@ -113,6 +115,9 @@ def test_cancel_endpoint_stops_real_worker_process_tree(tmp_path,fake_powershell
         last=marker.read_text();threading.Event().wait(.15)
         assert marker.read_text()==last
         if kind=='preparation': assert final['result']['job_kind']=='group_preparation'
+        records=[r.getMessage() for r in caplog.records if ('job='+job_id) in r.getMessage()]
+        for phase in ('process.started','cancel.observed','stop.begin','stop.confirmed','cancel.persist_begin','cancel.persisted'):
+            assert any(('phase='+phase+' ') in text for text in records),records
 
 
 def test_cancel_wins_when_committed_immediately_before_success_update(tmp_path):

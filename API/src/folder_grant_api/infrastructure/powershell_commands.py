@@ -152,9 +152,13 @@ def _ensure_ad_group_command(step: JobStepRecord) -> str:
 
 def _ensure_project_folder_command(step: JobStepRecord) -> str:
     template_path = (step.details or {})["template_path"]
+    existing_folder = (
+        "throw 'PROJECT_TEMPLATE_REPAIR_REQUIRED:이전 템플릿 복사가 완료되지 않았습니다. 기존 폴더 내용을 확인·복구해야 하므로 자동 복사를 중단했습니다.';"
+        if (step.details or {}).get('_template_copy_incomplete') else "Write-Output 'FOLDER_EXISTS';"
+    )
     return (
         f"if (Test-Path -LiteralPath {quote(step.target)} -PathType Container) {{"
-        "Write-Output 'FOLDER_EXISTS';"
+        f"{existing_folder}"
         "} else {"
         f"$output=& robocopy {quote(template_path)} {quote(step.target)} '*.*' /E /COPYALL;"
         "$robocopyCode=$LASTEXITCODE;"

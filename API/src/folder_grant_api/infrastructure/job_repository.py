@@ -109,24 +109,58 @@ class JobRepository:
             job = child
         raise RuntimeError('재실행 작업 이력에 순환이 있습니다.')
 
-    def create_retry(self, parent: JobRecord, actor: str) -> tuple[JobRecord, bool]:
+    def has_trusted_reused_steps(self, job: JobRecord) -> bool:
+        parent_id = job.request_payload.get('_retry_of_job_id')
+        if not parent_id or job.request_id != 'RETRY-' + parent_id:
+            return False
+        parent = self.get(parent_id)
+        if parent is None or parent.operation != job.operation:
+            return False
+        if job.request_payload.get('_original_request_id') != parent.request_payload.get('_original_request_id', parent.request_id):
+            return False
+        if any(step.status not in {'succeeded', 'cancelled'} for step in job.steps):
+            return False
+        reused = [step for step in job.steps if step.status == 'succeeded']
+        previous = {step.step_order: step for step in parent.steps}
+        return bool(reused) and all(
+            (step.result or {}).get('executor_mode') == 'powershell'
+            and (step.result or {}).get('reused_from_job_id') == parent.id
+            and (old := previous.get(step.step_order)) is not None
+            and old.status == 'succeeded'
+            and (old.result or {}).get('executor_mode') == 'powershell'
+            and old.step_type == step.step_type
+            and old.target == step.target
+            for step in reused
+        )
+
+    def create_retry(self, parent: JobRecord, actor: str, restart_all: bool = False) -> tuple[JobRecord, bool]:
         request_id = 'RETRY-'+parent.id
         existing = self.get_by_request_id(request_id)
         if existing is not None:
-            if existing.request_payload.get('_retry_of_job_id') != parent.id:
+            if (existing.request_payload.get('_retry_of_job_id') != parent.id
+                    or bool(existing.request_payload.get('_restart_all', False)) != restart_all):
                 raise DuplicateRequestError(request_id)
             return self.latest_attempt(existing), True
         payload = dict(parent.request_payload)
         payload.update(request_id=request_id, requested_by=actor,
                        _retry_of_job_id=parent.id,
                        _original_request_id=payload.get('_original_request_id',parent.request_id))
+        payload.pop('_restart_all', None)
+        if restart_all:
+            payload['_restart_all'] = True
         steps = []
         for old in parent.steps:
-            succeeded = old.status=='succeeded'
+            succeeded = old.status=='succeeded' and not restart_all
             result = {**(old.result or {}),'reused_from_job_id':parent.id} if succeeded else None
+            details = dict(old.details)
+            if parent.operation == 'create_project' and old.step_type == 'ensure_project_folder':
+                if old.status == 'succeeded':
+                    details.pop('_template_copy_incomplete', None)
+                elif old.started_at is not None:
+                    details['_template_copy_incomplete'] = True
             steps.append(JobStepRecord(step_order=old.step_order,step_type=old.step_type,
                 status='succeeded' if succeeded else 'queued',target=old.target,
-                description=old.description,details=dict(old.details),result=result,
+                description=old.description,details=details,result=result,
                 started_at=old.started_at if succeeded else None,
                 finished_at=old.finished_at if succeeded else None))
         job = JobRecord(request_id=request_id,source=parent.source,operation=parent.operation,
@@ -135,13 +169,16 @@ class JobRepository:
         try:
             self.session.add(job); self.session.flush()
             self.session.add(AuditLogRecord(job_id=job.id,event_type='job.retry_created',actor=actor,
-                message='실패 작업의 미완료 단계를 새 작업으로 접수했습니다.',
-                details={'retry_of_job_id':parent.id,'original_request_id':payload['_original_request_id']}))
+                message=('작업의 모든 단계를 새 작업으로 접수했습니다.' if restart_all
+                         else '작업의 미완료 단계를 새 작업으로 접수했습니다.'),
+                details={'retry_of_job_id':parent.id,'original_request_id':payload['_original_request_id'],
+                         'restart_all':restart_all}))
             self.session.commit()
         except IntegrityError:
             self.session.rollback()
             existing = self.get_by_request_id(request_id)
-            if existing is None or existing.request_payload.get('_retry_of_job_id') != parent.id:
+            if (existing is None or existing.request_payload.get('_retry_of_job_id') != parent.id
+                    or bool(existing.request_payload.get('_restart_all', False)) != restart_all):
                 raise DuplicateRequestError(request_id)
             return self.latest_attempt(existing), True
         return self.get(job.id), False
@@ -161,8 +198,9 @@ class JobRepository:
         self.session.refresh(job)
         if job.status == "cancelled":
             for step in job.steps:
-                step.status = "cancelled"
-                step.finished_at = job.finished_at
+                if step.status == "queued":
+                    step.status = "cancelled"
+                    step.finished_at = job.finished_at
         self.session.add(AuditLogRecord(
             job_id=job.id,
             event_type="job.cancel_requested",

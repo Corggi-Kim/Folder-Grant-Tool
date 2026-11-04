@@ -36,8 +36,8 @@ from PyQt5.QtCore import Qt, QRect, pyqtSignal, QThread, QObject, pyqtSlot, QTim
 from openpyxl import load_workbook
 
 APP_NAME = "Folder Grant API Client"
-APP_VERSION = "1.1.5"  #구조변경, 기능추가/수정, 오류/버그수정
-APP_BUILD = "2026-11-03"
+APP_VERSION = "1.1.6"  #구조변경, 기능추가/수정, 오류/버그수정
+APP_BUILD = "2026-11-04"
 APP_VERSION_STR = f"v{APP_VERSION}"
 
 THEMES = {'light': {'bg': '#f4f6fa',
@@ -100,8 +100,8 @@ HELP_PAGES = (
         ("목록에 없는 폴더 요청", "DM_IWRS처럼 선택 목록에 없는 폴더도 BUS·엑셀에서 불러와 처리할 수 있습니다. 수동 입력에서는 Level3에 실제 폴더명을 직접 입력하세요. 실행 전 실제 폴더와 권한 처리 조건을 확인하며, 폴더가 없거나 조회할 수 없으면 보류합니다."),
         ("실행 중 중지", "중지를 누르면 다음 요청을 실행하지 않고 서버에 현재 작업의 중지를 요청합니다. 서버는 해당 PowerShell과 하위 작업을 종료한 뒤 중지 결과를 반환합니다. 확인하는 동안 중지 버튼은 비활성화됩니다. 이미 적용된 권한은 자동 복구되지 않으며 중지된 요청은 BUS 완료 처리하지 않습니다."),
         ("부분 성공은 어떤 뜻인가요?", "일부 단계만 처리된 상태입니다. 예를 들어 그룹에 사용자를 추가했지만 폴더 권한 적용에는 실패했을 수 있습니다. 오른쪽 상세에서 실패한 단계와 이유를 확인하세요. 이 상태에서는 BUS를 완료 처리하지 않습니다."),
-        ("문제를 고친 뒤 다시 실행하려면?", "폴더 누락 등 표시된 원인을 먼저 해결하세요. 실패하거나 부분 성공한 권한 요청을 체크하고 선택 실행을 누른 뒤 재시도 안내를 확인하세요. 이전에 성공한 단계는 유지하고 남은 단계를 다시 처리합니다."),
-        ("신규 프로젝트 생성이 실패했을 때", "로그와 상세에서 실패 단계를 확인하고 서버 담당자와 실제 그룹·폴더 상태를 확인하세요. 권한 요청의 실패 단계 재실행 기능과는 다릅니다. 서버 생성은 성공했고 BUS만 완료되지 않았다면 신규 프로젝트 탭의 BUS 완료 재확인을 사용하세요."),
+        ("문제를 고친 뒤 다시 실행하려면?", "폴더 누락 등 표시된 원인을 먼저 해결하세요. 중지·실패·부분 성공한 요청을 체크하고 선택 실행을 누르세요. 권한 요청은 다시 검증한 뒤 이전에 성공한 단계를 유지하고 남은 단계를 처리합니다. 이미 완료된 항목은 다시 실행 또는 취소를 직접 선택합니다. 다시 실행을 선택하면 모든 작업 단계를 요청하며 기존 BUS 완료 기록은 유지합니다."),
+        ("신규 프로젝트 생성이 실패했을 때", "로그와 상세에서 실패 단계를 확인하고 서버 담당자와 실제 그룹·폴더 상태를 확인하세요. 중지·실패한 요청은 선택 실행으로 남은 단계를 다시 요청할 수 있습니다. 다만 템플릿 복사 중 중단되어 폴더가 일부만 생겼다면 자동 복사를 멈추고 서버 담당자의 확인·복구가 필요하다고 안내합니다. 서버 생성은 성공했고 BUS만 완료되지 않았다면 신규 프로젝트 탭의 BUS 완료 재확인을 사용하세요."),
         ("Isolated 보안그룹 생성 확인", "Isolated 그룹만 없고 기존 폴더 등 준비 조건을 확인한 경우 생성 여부를 묻습니다. 계속을 누르면 서버가 그룹과 기본 읽기 권한을 준비한 뒤 다시 검증합니다. 폴더 자체를 만들지는 않으며, 취소하면 실행을 보류합니다. 이번 세션 자동 생성은 동의한 경우에만 적용됩니다."),
         ("시간 초과 또는 결과 확인이 안 될 때", "오래 걸리는 작업은 아직 처리 중일 수 있습니다. 해당 탭의 BUS 완료 재확인으로 서버 상태를 확인하세요. 실패가 확인되면 원인을 해결한 뒤 재시도하고, 결과가 확실하지 않다면 중복 실행 전에 관리자에게 확인하세요."),
         ("새 요청이 자동으로 나타나나요?", "시작할 때 두 목록을 불러옵니다. 이후 새 요청은 BUS 요청 조회 또는 BUS 신규 조회로 갱신하세요. 알림·숫자 배지와 주기적인 자동 감지는 현재 사용하지 않습니다."),
@@ -111,7 +111,7 @@ HELP_PAGES = (
     ("설정과 기록", (
         ("연결과 로그인 설정", "오른쪽 위 톱니바퀴 메뉴에서 서버 주소, API Key와 BUS 로그인 정보를 관리하세요. API Key는 관리자에게 받은 값을 입력합니다. 저장한 API Key는 이 PC의 설정 파일에 평문으로 보관됩니다."),
         ("숨겨진 정보 확인과 화면 테마", "상세 열 표시는 두 탭에 함께 적용됩니다. 권한 요청은 이름·부서·Role 등을, 신규 프로젝트는 코드·이름·경로·요청자 정보를 보여 줍니다. 신규 프로젝트의 요청자 직책은 제외합니다. 달/해 아이콘으로 테마를 바꿀 수 있습니다."),
-        ("작업 로그와 상세 기록", "화면 아래 작업 로그에는 처리 결과를 짧게 보여줍니다. 오류 원인을 자세히 확인할 때는 C:\\FGT\\Log\\access.log 파일을 확인하세요. 같은 파일에 날짜와 시간을 포함해 계속 기록합니다. 로그 지우기는 화면의 로그만 비웁니다."),
+        ("작업 로그와 상세 기록", "화면 아래 작업 로그에는 처리 결과를 짧게 보여줍니다. 접거나 펼친 상태는 다음 작업과 프로그램을 다시 켰을 때도 유지합니다. 오류 원인을 자세히 확인할 때는 C:\\FGT\\Log\\access.log 파일을 확인하세요. 같은 파일에 날짜와 시간을 포함해 계속 기록합니다. 로그 지우기는 화면의 로그만 비웁니다."),
         ("다운로드한 파일", "BUS에서 내려받은 파일은 C:\\FGT\\ef 폴더에서 확인할 수 있습니다."),
     )),
 )
@@ -520,7 +520,7 @@ def make_project_payload(project_code: str, project_name: str, request_id: str,
 
 
 def can_complete_bus(result: dict, source: str, stopped: bool = False) -> bool:
-    return bool(not stopped and source == 'bus' and result.get('status') == 'succeeded'
+    return bool(not stopped and not result.get('restart_declined') and source == 'bus' and result.get('status') == 'succeeded'
                 and result.get('executor_mode') == 'powershell'
                 and (result.get('result') or {}).get('job_kind') != 'group_preparation'
                 and not any(step.get('type')=='prepare_isolated_group' for step in (result.get('steps') or [])))
@@ -615,14 +615,35 @@ class FolderGrantApiClient:
         return self.request('GET', '/ready')
 
 
+def retry_candidate(result, allow_completed=False):
+    statuses = {'failed','partially_succeeded','cancelled'}
+    if allow_completed: statuses.add('succeeded')
+    if (result.get('status') not in statuses or result.get('executor_mode')!='powershell'
+            or result.get('error_code')=='POWERSHELL_STOP_FAILED'
+            or (result.get('result') or {}).get('job_kind')=='group_preparation'
+            or any(step.get('error_code')=='POWERSHELL_STOP_FAILED' for step in result.get('steps',[]))):
+        return None
+    return result.get('job_id')
+
+
+def completed_selection(meta):
+    result = meta.get('result') or {}
+    if (result.get('status') in {'failed','partially_succeeded','cancelled','queued','running','cancel_requested'}
+            or meta.get('_retry_parent_job_id') or meta.get('_failed_job_id')):
+        return False
+    return bool(meta.get('bus_done') or
+                (result.get('status')=='succeeded' and result.get('executor_mode')=='powershell'))
+
+
 class ApiJobWorker(QObject):
     progress = pyqtSignal(dict)
     succeeded = pyqtSignal(dict)
     failed = pyqtSignal(str)
     finished = pyqtSignal()
     groupPreparationRequested = pyqtSignal(dict)
+    completedRestartRequested = pyqtSignal(dict)
 
-    def __init__(self, client: FolderGrantApiClient, kind: str, payload: dict, dry_run: bool = False, retry_job_id: str = None, validate_only: bool = False, preflight: bool = False, prepare_group: bool = False, group_preparation_payload: dict | None = None):
+    def __init__(self, client: FolderGrantApiClient, kind: str, payload: dict, dry_run: bool = False, retry_job_id: str = None, validate_only: bool = False, preflight: bool = False, prepare_group: bool = False, group_preparation_payload: dict | None = None, retry_replayed: bool = False, restart_all: bool = False):
         super().__init__()
         if kind not in {'access', 'project'}:
             raise ValueError('알 수 없는 API 작업 종류입니다.')
@@ -632,14 +653,18 @@ class ApiJobWorker(QObject):
         self._stop_event = threading.Event()
         self.job_id = None
         self.retry_job_id = retry_job_id
+        self.retry_replayed = retry_replayed
+        self.restart_all = restart_all
         self.validate_only = validate_only
         self.preflight = preflight
         self.prepare_group = prepare_group
-        if prepare_group and (kind!='access' or dry_run or validate_only or preflight or retry_job_id):
+        if prepare_group and (kind!='access' or dry_run or validate_only or preflight or retry_job_id or restart_all):
             raise ValueError('그룹 준비는 별도 권한 준비 작업으로만 실행할 수 있습니다.')
         self.group_preparation_payload = dict(group_preparation_payload) if group_preparation_payload else None
         self._group_answer = threading.Event()
         self._group_approved = False
+        self._restart_answer = threading.Event()
+        self._restart_approved = False
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -667,6 +692,19 @@ class ApiJobWorker(QObject):
     def respond_to_group_preparation(self, approved):
         self._group_approved = bool(approved)
         self._group_answer.set()
+
+    def respond_to_completed_restart(self, approved):
+        self._restart_approved = bool(approved)
+        self._restart_answer.set()
+
+    def _confirm_replayed_success(self, job):
+        if self.receivers(self.completedRestartRequested)==0 or self._stop_event.is_set():
+            return False
+        self._restart_answer.clear(); self._restart_approved = False
+        self.completedRestartRequested.emit(dict(job))
+        while not self._restart_answer.wait(.1):
+            if self._stop_event.is_set(): return False
+        return self._restart_approved and not self._stop_event.is_set()
 
     def _read_preflight(self):
         self.progress.emit(dict(status='validating'))
@@ -778,31 +816,49 @@ class ApiJobWorker(QObject):
             # A UI signal can request cancellation immediately after validation.
             if self._stop_event.is_set():
                 return dict(validation,preflight_blocked=True,client_stopped=True,message='중지 요청으로 실행을 보류했습니다.')
-        try:
-            if self.retry_job_id:
-                job = self.client.request('POST',path+'/'+quote(self.retry_job_id,safe='')+'/retry',
-                                          {'requested_by':self.payload['requested_by']})
-            else:
-                job = self.client.request('POST', path+('/prepare-group' if self.prepare_group else ''), self.payload)
-        except ApiClientError as exc:
-            if self.retry_job_id and exc.status_code==404:
-                raise ApiClientError('재실행 API를 사용할 수 없습니다. API 서버를 최신 버전으로 업데이트하고 재시작하세요.',404) from exc
-            if self.prepare_group and exc.status_code==404:
-                raise ApiClientError('그룹 준비 API가 없습니다. API 서버를 업데이트하고 재시작하세요.',404) from exc
-            bus_conflict = not self.prepare_group and not self.retry_job_id and exc.status_code == 409 and self.payload.get('source') == 'bus'
-            if exc.status_code is not None and exc.status_code < 500 and not bus_conflict:
-                raise
-            # An accepted POST can lose its response. Never generate a new ID here.
+        for submission in range(2):
             try:
-                job = self.client.request('GET', path + '/by-request/' + quote(self.payload['request_id'], safe=''))
-                if self.retry_job_id and job.get('job_id')==self.retry_job_id:
-                    raise ApiClientError('재실행 접수 여부를 확인하지 못했습니다. 같은 항목으로 다시 시도하세요.')
-                if bus_conflict:
-                    preview = self.client.request('POST',path+'/preview',self.payload)
-                    self._verify_recovered_job(job,preview)
-                    job = {**job,'replayed':True,'recovered_after_actor_conflict':True}
-            except ApiClientError as recovery:
-                raise ApiClientError(f'등록 결과를 확인하지 못했습니다. 같은 요청으로 재시도하세요. request_id={self.payload["request_id"]}: {recovery}') from exc
+                if self.retry_job_id:
+                    job = self.client.request('POST',path+'/'+quote(self.retry_job_id,safe='')+'/retry',
+                                              dict(requested_by=self.payload['requested_by'],**({'restart_all':True} if self.restart_all else {})))
+                else:
+                    job = self.client.request('POST', path+('/prepare-group' if self.prepare_group else ''), self.payload)
+            except ApiClientError as exc:
+                if self.retry_job_id and exc.status_code==404:
+                    raise ApiClientError('재실행 API를 사용할 수 없습니다. API 서버를 최신 버전으로 업데이트하고 재시작하세요.',404) from exc
+                if self.prepare_group and exc.status_code==404:
+                    raise ApiClientError('그룹 준비 API가 없습니다. API 서버를 업데이트하고 재시작하세요.',404) from exc
+                bus_conflict = not self.prepare_group and not self.retry_job_id and exc.status_code == 409 and self.payload.get('source') == 'bus'
+                if exc.status_code is not None and exc.status_code < 500 and not bus_conflict:
+                    raise
+                # An accepted POST can lose its response. Never generate a new ID here.
+                try:
+                    job = self.client.request('GET', path + '/by-request/' + quote(self.payload['request_id'], safe=''))
+                    if self.retry_job_id and job.get('job_id')==self.retry_job_id:
+                        raise ApiClientError('재실행 접수 여부를 확인하지 못했습니다. 같은 항목으로 다시 시도하세요.')
+                    if bus_conflict:
+                        preview = self.client.request('POST',path+'/preview',self.payload)
+                        self._verify_recovered_job(job,preview)
+                        job = {**job,'replayed':True,'recovered_after_actor_conflict':True}
+                except ApiClientError as recovery:
+                    raise ApiClientError(f'등록 결과를 확인하지 못했습니다. 같은 요청으로 재시도하세요. request_id={self.payload["request_id"]}: {recovery}') from exc
+            if (submission==0 and self.retry_replayed and not self.prepare_group and job.get('replayed')
+                    and not self.restart_all and self.receivers(self.completedRestartRequested)>0
+                    and retry_candidate(job,allow_completed=True)
+                    and job.get('status')=='succeeded'):
+                if self.payload['request_id'] not in {job.get('request_id'),job.get('original_request_id')}:
+                    raise ApiClientError('완료된 Job의 요청번호가 일치하지 않습니다.')
+                self.restart_all = self._confirm_replayed_success(job)
+                if not self.restart_all: job = dict(job,restart_declined=True)
+            candidate = retry_candidate(job,allow_completed=self.restart_all)
+            if (submission==0 and self.retry_replayed and not self.prepare_group
+                    and job.get('replayed') and candidate and not self._stop_event.is_set()):
+                if self.payload['request_id'] not in {job.get('request_id'),job.get('original_request_id')}:
+                    raise ApiClientError('재실행할 Job의 요청번호가 일치하지 않습니다.')
+                self.retry_job_id = candidate
+                self.progress.emit(dict(status='retrying',retry_parent_job_id=candidate))
+                continue
+            break
         if self.prepare_group and job.get('request_id')!=self.payload['request_id']:
             raise ApiClientError('그룹 준비 Job의 요청번호가 일치하지 않습니다.')
         self.job_id = job.get('job_id')
@@ -3807,8 +3863,6 @@ class NewItemsViewer(QDialog):
             if completion_only and (meta.get('source')!='bus' or meta.get('bus_done') or not meta.get('request_id')):
                 parent._log(f'{row+1}행: 미완료 BUS 요청이 아니므로 완료 재확인에서 제외했습니다.')
                 continue
-            if meta.get('bus_done') and not dry_run:
-                continue
             project = code_item.text().strip()
             name_item = self.tbl.item(row,name_col) if name_col >= 0 else None
             name = name_item.text().strip() if name_item else ''
@@ -3817,6 +3871,13 @@ class NewItemsViewer(QDialog):
             except ValueError as exc:
                 QMessageBox.warning(self,'입력 확인',str(exc)); return
             items.append(dict(proj=project,name=name,row=row,**meta))
+        if not dry_run and not completion_only:
+            completed = [item for item in items if completed_selection(item)]
+            if completed:
+                if parent._confirm_completed_restart(len(completed)):
+                    for item in completed: item['restart_all'] = True
+                else:
+                    items = [item for item in items if item not in completed]
         if not items:
             return
         parent.stop_requested = False
@@ -3836,6 +3897,7 @@ class NewItemsViewer(QDialog):
         self.worker.progress.connect(self._on_worker_progress)
         self.worker.itemResult.connect(self._on_project_result)
         self.worker.itemProgress.connect(self._on_project_progress)
+        self.worker.completedRestartRequested.connect(self._on_project_restart_requested)
         self.worker.finished.connect(self._on_worker_finished)
         self.worker.finished.connect(self.worker.deleteLater)
         self.worker.finished.connect(self.worker_thread.quit,type=Qt.DirectConnection)
@@ -3848,6 +3910,11 @@ class NewItemsViewer(QDialog):
             self.worker.stop()
         self.worker_thread.start()
 
+
+    def _on_project_restart_requested(self, job):
+        if self.worker is not None:
+            self.worker.respond_to_completed_restart(not self.host._closing and not self.host.stop_requested
+                                                     and self.host._confirm_completed_restart(1))
 
     def _on_project_result(self,row,result):
         self._update_project_path(row,result)
@@ -3866,7 +3933,7 @@ class NewItemsViewer(QDialog):
                 meta.update(validation_result=result,show_validation=True)
             else:
                 meta.pop('show_validation',None)
-                meta.update(result=result,bus_done=result.get('bus_done',False))
+                meta.update(result=result,bus_done=bool(meta.get('bus_done') or result.get('bus_done',False)))
             item.setData(Qt.UserRole,meta)
             item.setToolTip(json.dumps(result,ensure_ascii=False,indent=2))
         self.tbl.setItem(row,self._status_col,QTableWidgetItem((('실행 보류 · ' if result.get('preflight_blocked') else '')+validation_label(result)) if result.get('status')=='validated' else self._project_result_label(result)))
@@ -3913,6 +3980,7 @@ class NewItemsViewer(QDialog):
 
 
 class CreateWorker(QObject):
+    completedRestartRequested = pyqtSignal(dict)
     itemProgress = pyqtSignal(int,dict)
     itemResult = pyqtSignal(int,dict)
     progress = pyqtSignal(int, int, str)
@@ -4295,6 +4363,10 @@ class CreateWorker(QObject):
                     pass
 
 
+    def respond_to_completed_restart(self, approved):
+        if self._active_job is not None:
+            self._active_job.respond_to_completed_restart(approved)
+
     def _run_completion_only(self):
         completed = pending = 0
         try:
@@ -4308,7 +4380,7 @@ class CreateWorker(QObject):
                 self.itemProgress.emit(item.get('row',index),dict(status='completion_checking'))
                 try:
                     result = self.client.request('GET','/api/v1/project-jobs/by-request/'+quote(request_id,safe=''))
-                    if (result.get('request_id')!=request_id or not result.get('job_id')
+                    if (request_id not in {result.get('request_id'),result.get('original_request_id')} or not result.get('job_id')
                             or result.get('project_code')!=canonical_project_code(item['proj'])
                             or result.get('project_name')!=item.get('name','').strip()):
                         raise ApiClientError('서버 프로젝트 작업이 현재 BUS 요청과 일치하지 않습니다.')
@@ -4359,10 +4431,14 @@ class CreateWorker(QObject):
                 request_id = item.get('request_id') or new_client_request_id()
                 payload = make_project_payload(item['proj'],item.get('name',''),request_id,source,self.requested_by)
                 cached = item.get('result',{})
-                if not self.dry_run and not self.validate_only and can_complete_bus(cached,source) and not item.get('bus_done'):
+                restart_all = bool(item.get('restart_all'))
+                if not restart_all and not self.dry_run and not self.validate_only and can_complete_bus(cached,source) and not item.get('bus_done'):
                     result = dict(cached)
                 else:
-                    self._active_job = ApiJobWorker(self.client,'project',payload,self.dry_run,validate_only=self.validate_only,preflight=False)
+                    self._active_job = ApiJobWorker(self.client,'project',payload,self.dry_run,validate_only=self.validate_only,preflight=False,
+                        retry_job_id=retry_candidate(cached,allow_completed=restart_all),retry_replayed=True,restart_all=restart_all)
+                    if self.receivers(self.completedRestartRequested)>0:
+                        self._active_job.completedRestartRequested.connect(self.completedRestartRequested.emit)
                     self._active_job.progress.connect(lambda result,row=item.get('row',index):self.itemProgress.emit(row,result))
                     if self._stop:
                         self._active_job.stop()
@@ -4380,7 +4456,7 @@ class CreateWorker(QObject):
                 elif result.get('preflight_blocked') or result.get('status') not in {'preview','simulated','validated'}:
                     fail_count += 1
                 message = f"{item['proj']} API {result.get('status')}: {result.get('error_message') or ''}"
-                if self.auto_complete and not self.validate_only and can_complete_bus(result,source,self._stop or result.get('client_stopped',False)):
+                if self.auto_complete and not item.get('bus_done') and not self.validate_only and can_complete_bus(result,source,self._stop or result.get('client_stopped',False)):
                     if not self.creds.get('id') or not self.creds.get('pw'):
                         result['bus_done'] = False
                         message += ' / BUS 계정 누락: 완료만 재시도 가능'
@@ -5066,6 +5142,12 @@ class AccessManager(QMainWindow):
         self.log.setFont(QFont('Consolas' if os.name=='nt' else 'Noto Sans Mono CJK KR',9))
         self.log.setLineWrapMode(QTextEdit.WidgetWidth); self.log.setWordWrapMode(QTextOption.WrapAnywhere)
         logs.addWidget(self.log)
+        try:
+            with open(os.path.join(CONF_DIR,'ui_state.json'),encoding='utf-8') as handle:
+                expanded = json.load(handle).get('log_expanded',True)
+            if isinstance(expanded,bool): self.log_toggle.setChecked(expanded)
+        except (OSError,ValueError,AttributeError):
+            pass
         logs_outer = QWidget()
         logs_outer_layout = QVBoxLayout(logs_outer)
         logs_outer_layout.setContentsMargins(18,10,18,0)
@@ -5937,6 +6019,7 @@ class AccessManager(QMainWindow):
         entry = self.run_queue.pop(0)
         row,payload,dry = entry[:3]
         retry_job_id = entry[3] if len(entry)>3 else None
+        restart_all = entry[4] if len(entry)>4 else False
         self.current_row = row
         self._start_request_timer()
         meta = self._row_metadata(row)
@@ -5951,16 +6034,17 @@ class AccessManager(QMainWindow):
         self._log(f"API {'요청 검증' if dry else 'Job'} 요청: {payload['request_id']}",
                   summary=f"{row+1}행 · 프로젝트 {self._get(row,self.COL_PROJ)}: {'요청 검증' if dry else '권한 작업'} 요청")
         if retry_job_id:
-            self._log(f'실패 작업 재실행: 이전 job_id={retry_job_id}',summary=f'{row+1}행: 실패 단계 재실행 요청')
+            self._log(f'실패 작업 재실행: 이전 job_id={retry_job_id}',summary=f'{row+1}행: '+('전체 단계 다시 실행 요청' if restart_all else '미완료 단계 재실행 요청'))
         thread = QThread(self)
         worker = ApiJobWorker(self._api_client(),'access',
                               dict(payload,requested_by=self._requester()) if retry_job_id else payload,
-                              dry,retry_job_id=retry_job_id,validate_only=dry,preflight=not dry,group_preparation_payload=meta.get('group_preparation_payload'))
+                              dry,retry_job_id=retry_job_id,validate_only=dry,preflight=not dry,group_preparation_payload=meta.get('group_preparation_payload'),retry_replayed=not dry,restart_all=restart_all)
         self.api_thread,self.api_worker = thread,worker
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.progress.connect(self._on_api_progress)
         worker.groupPreparationRequested.connect(self._on_group_preparation_requested)
+        worker.completedRestartRequested.connect(self._on_completed_restart_requested)
         worker.succeeded.connect(self._on_api_result)
         worker.failed.connect(self._on_api_error)
         worker.finished.connect(worker.deleteLater)
@@ -6018,7 +6102,6 @@ class AccessManager(QMainWindow):
             self._log(f"수동 입력 추가: 구분={kind}, 요청={reqtype}, 사번={user}, 프로젝트={proj}, L2={lv2}, L3={lv3}, ROLE={'없음' if not role else role}")
 
     def _log_validation(self, result, context):
-        self.log_toggle.setChecked(True)
         self._log(json.dumps(result,ensure_ascii=False,indent=2),
                   summary=f'{context}: {validation_log_summary(result)}')
 
@@ -6033,7 +6116,9 @@ class AccessManager(QMainWindow):
         error = result.get('error_code')
         if error:
             label += ' · '+('서버 시간 초과' if error=='POWERSHELL_TIMEOUT' else str(error))
-        if result.get('replayed'):
+        if result.get('restart_declined'):
+            label += ' · 다시 실행 취소'
+        elif result.get('replayed'):
             label += ' · 이전 작업 결과 · 재실행 안 함'
         return f'{context}: {label}'
 
@@ -6311,6 +6396,19 @@ class AccessManager(QMainWindow):
             if cb:
                 cb.setChecked(checked)
 
+    def _confirm_completed_restart(self, count):
+        box = QMessageBox(self)
+        box.setWindowTitle('완료된 작업 다시 실행')
+        box.setIcon(QMessageBox.Question)
+        box.setText(f'이미 완료된 {count}건을 다시 실행할까요?')
+        box.setInformativeText('다시 실행하면 모든 권한 작업 단계를 새 작업으로 요청합니다. 기존 파일과 BUS 완료 기록은 유지합니다.')
+        restart = box.addButton('다시 실행',QMessageBox.AcceptRole)
+        cancel = box.addButton('취소',QMessageBox.RejectRole)
+        box.setDefaultButton(cancel); box.setEscapeButton(cancel)
+        box.exec_()
+        return box.clickedButton() is restart
+
+
     def run_execute(self):
         if self.api_thread is not None or self.session.is_busy() or self._waiting_for_bus:
             return
@@ -6319,22 +6417,29 @@ class AccessManager(QMainWindow):
             if not self.api_config.get('api_key'):
                 return
         retry_rows = {}
+        completed_rows = set()
+        restart_rows = set()
         if not self.chk_dry.isChecked():
             for row in range(self.table.rowCount()):
+                if not self._is_row_checked(row): continue
                 meta = self._row_metadata(row)
                 result = meta.get('result') or {}
-                parent = None
-                if result.get('status') in {'failed','partially_succeeded'} and result.get('executor_mode')=='powershell':
-                    parent = result.get('job_id')
-                elif result.get('status') in {None,'preview'}:
+                if completed_selection(meta):
+                    completed_rows.add(row)
+                    continue
+                parent = retry_candidate(result)
+                if not parent and result.get('status') in {None,'preview'}:
                     parent = meta.get('_retry_parent_job_id') or meta.get('_failed_job_id')
-                if self._is_row_checked(row) and parent and not meta.get('bus_done'):
-                    retry_rows[row] = parent
-            if retry_rows and QMessageBox.question(self,'실패 작업 재실행',
-                    f'실패·부분 성공한 {len(retry_rows)}건을 새 Job으로 재실행할까요?\n'
-                    '폴더 등 실패 원인을 조치했는지 확인하세요.\n'
-                    '성공한 단계는 유지하고 실패한 단계와 이후 단계만 실행합니다.\n'
-                    '모든 단계가 실제 성공한 경우에만 BUS 완료가 가능합니다.',
+                if parent: retry_rows[row] = parent
+            if completed_rows and self._confirm_completed_restart(len(completed_rows)):
+                restart_rows = completed_rows.copy()
+                for row in restart_rows:
+                    parent = retry_candidate(self._row_metadata(row).get('result') or {},allow_completed=True)
+                    if parent: retry_rows[row] = parent
+            pending_retries = set(retry_rows)-restart_rows
+            if pending_retries and QMessageBox.question(self,'미완료 작업 재실행',
+                    f'중지·실패·부분 성공한 {len(pending_retries)}건을 새 작업으로 재실행할까요?\n'
+                    '성공한 단계는 유지하고 완료되지 않은 단계부터 실행합니다.',
                     QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:
                 return
         self.stop_requested = False
@@ -6343,7 +6448,7 @@ class AccessManager(QMainWindow):
         self.auto_complete_after_add = self.chk_auto_complete.isChecked()
         queue = []
         for row in range(self.table.rowCount()):
-            if not self._is_row_checked(row):
+            if not self._is_row_checked(row) or (row in completed_rows and row not in restart_rows):
                 continue
             ok, reason = self.validate_row(row)
             if not ok:
@@ -6362,7 +6467,7 @@ class AccessManager(QMainWindow):
                 meta['_retry_parent_job_id'] = retry_rows[row]
             # Keep the previous actual result if preflight blocks registration.
             self._set_row_metadata(row,meta)
-            queue.append((row,payload,self.chk_dry.isChecked(),retry_rows.get(row)))
+            queue.append((row,payload,self.chk_dry.isChecked(),retry_rows.get(row),row in restart_rows))
         if not queue:
             return
         self.run_queue = queue
@@ -6440,6 +6545,13 @@ class AccessManager(QMainWindow):
         return {**values, 'row': row, 'path': path}
 
 
+    def _on_completed_restart_requested(self, job):
+        worker = self.sender()
+        if isinstance(worker,ApiJobWorker):
+            approved = (worker is self.api_worker and not self._closing and not self.stop_requested
+                        and self._confirm_completed_restart(1))
+            worker.respond_to_completed_restart(approved)
+
     def _on_group_preparation_requested(self, info):
         worker = self.sender() or self.api_worker
         if (not isinstance(worker,ApiJobWorker) or worker is not self.api_worker
@@ -6466,7 +6578,10 @@ class AccessManager(QMainWindow):
     def _on_api_progress(self, job):
         self._set_api_connection_state(True,job)
         meta = self._row_metadata(self.current_row)
-        if job.get('status') in {'awaiting_group_confirmation','preparing'}:
+        if job.get('status')=='retrying':
+            meta.update(_retry_parent_job_id=job['retry_parent_job_id'],live_result=dict(status='submitting',valid=True))
+            self.table.item(self.current_row,self.COL_STATUS).setText('재실행 요청 중')
+        elif job.get('status') in {'awaiting_group_confirmation','preparing'}:
             meta.update(live_result=dict(status=job['status']),show_validation=False)
             if job.get('validation'):
                 self._log_validation(job['validation'],f'{self.current_row+1}행 · 그룹 생성 전 확인')
@@ -6511,7 +6626,7 @@ class AccessManager(QMainWindow):
         meta.pop('show_validation',None)
         previous = meta.get('result') or {}
         if result.get('status')=='preview':
-            if previous.get('status') in {'failed','partially_succeeded'} and previous.get('executor_mode')=='powershell':
+            if retry_candidate(previous):
                 meta['_failed_job_id'] = previous.get('job_id')
         else:
             meta.pop('_retry_parent_job_id',None)
@@ -6584,6 +6699,14 @@ class AccessManager(QMainWindow):
     def _toggle_log(self,expanded):
         self.log.setVisible(expanded)
         self.log_toggle.setText(('⌄' if expanded else '›')+'  작업 로그')
+        try:
+            path = os.path.join(CONF_DIR,'ui_state.json')
+            temporary = path+'.tmp'
+            with open(temporary,'w',encoding='utf-8') as handle:
+                json.dump(dict(log_expanded=bool(expanded)),handle)
+            os.replace(temporary,path)
+        except OSError:
+            pass
 
 
     def _toggle_detail_columns(self,visible):

@@ -20,9 +20,9 @@ class DesignTests(unittest.TestCase):
         self.app.processEvents()
 
     def test_version_and_build_are_visible_in_main_header(self):
-        self.assertEqual(self.m.APP_VERSION,'1.1.5')
-        self.assertEqual(self.m.APP_BUILD,'2026-11-03')
-        self.assertEqual(self.window.release_label.text(),'V1.1.5 Build:20261103')
+        self.assertEqual(self.m.APP_VERSION,'1.1.6')
+        self.assertEqual(self.m.APP_BUILD,'2026-11-04')
+        self.assertEqual(self.window.release_label.text(),'V1.1.6 Build:20261104')
         self.show()
         w = self.window
         self.assertGreater(w.release_label.mapTo(w,self.m.QPoint(0,0)).y(),w.btn_stop.mapTo(w,self.m.QPoint(0,0)).y()+w.btn_stop.height())
