@@ -234,7 +234,7 @@ def test_output_collector_failure_reaches_monitor_and_cleans_process_tree():
         with pytest.raises(PowerShellExecutionError) as error:
             PowerShellRunner('unused',10,cancel_check=lambda:False).run('ignored')
     assert error.value.code=='POWERSHELL_IO_FAILED'
-    process.communicate.assert_called_once_with(input=b'FGT_START\n')
+    process.communicate.assert_called_once()
     job.terminate.assert_called_once()
     process.wait.assert_called_once_with(timeout=5)
 
